@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -61,7 +61,9 @@ class MainWindow(QMainWindow):
         )
         self.firmware_service = firmware_service or FirmwareService()
         self.section_buttons: dict[str, QPushButton] = {}
-        self.setWindowTitle(settings.app_name)
+        self.setWindowTitle(settings.app_display_name)
+        if settings.icon_path.is_file():
+            self.setWindowIcon(QIcon(str(settings.icon_path)))
 
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(settings.serial_poll_interval_ms)
@@ -93,7 +95,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(10)
 
-        self.hero_title_label = QLabel("ESP32 Pop-up Controller", card)
+        self.hero_title_label = QLabel(f"ESP32 Pop-up Controller v{self.settings.app_version}", card)
         self.hero_title_label.setObjectName("heroTitle")
 
         self.hero_subtitle_label = QLabel(
@@ -414,7 +416,8 @@ class MainWindow(QMainWindow):
             f"Automatic reconnect to {port} after firmware flash did not succeed. Press Connect to try again."
         )
         self._append_log(f"Automatic reconnect after firmware flash did not succeed on {port}.")
-        
+        self.statusBar().showMessage(f"Automatic reconnect to {port} failed.")
+
     def reboot_controller(self) -> None:
         if not self.serial_service.is_connected:
             QMessageBox.information(self, "Connect first", "Connect to the controller before requesting a reboot.")
@@ -688,6 +691,7 @@ class MainWindow(QMainWindow):
         if self.serial_service.is_connected:
             self.serial_service.disconnect()
         event.accept()
+
 
 
 

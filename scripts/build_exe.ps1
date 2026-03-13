@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [switch]$SkipTests
 )
@@ -59,6 +59,14 @@ try {
         throw "PyInstaller spec file not found at $specFile"
     }
 
+    $version = (& $pythonExe scripts\versioning.py current).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)) {
+        throw 'Unable to resolve the application version for packaging.'
+    }
+
+    $exeBaseName = "popup-controller-v$version"
+    $exePath = Join-Path $distDirectory "$exeBaseName.exe"
+
     if (-not $SkipTests) {
         Write-Host 'Running test suite before packaging...'
         & $pythonExe -m pytest
@@ -67,7 +75,11 @@ try {
         }
     }
 
-    Write-Host 'Building standalone executable with PyInstaller...'
+    if (Test-Path $distDirectory) {
+        Get-ChildItem $distDirectory -Filter 'popup-controller*.exe' -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+    }
+
+    Write-Host "Building standalone executable with PyInstaller for version $version..."
     & $pythonExe -m PyInstaller --clean --noconfirm $specFile
     if ($LASTEXITCODE -ne 0) {
         throw 'PyInstaller build failed.'
@@ -99,7 +111,6 @@ try {
     Copy-LicenseFile -Path (Join-Path $repositoryRoot '.venv\Lib\site-packages\esptool\targets\stub_flasher\2\LICENSE-APACHE') -DestinationName 'esptool_stub_flasher\LICENSE-APACHE'
     Copy-LicenseFile -Path (Join-Path $repositoryRoot '.venv\Lib\site-packages\esptool\targets\stub_flasher\2\LICENSE-MIT') -DestinationName 'esptool_stub_flasher\LICENSE-MIT'
 
-    $exePath = Join-Path $distDirectory 'popup-controller.exe'
     if (-not (Test-Path $exePath)) {
         throw "Build completed but executable was not found at $exePath"
     }

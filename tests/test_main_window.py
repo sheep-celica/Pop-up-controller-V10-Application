@@ -1,6 +1,5 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
@@ -47,6 +46,19 @@ class FakeSerialService:
 class FakeFirmwareService:
     def flash_firmware(self, port: str, firmware_path: Path) -> FlashResult:
         return FlashResult(True, f"Flashed test bundle to {port}.")
+
+
+def test_main_window_shows_application_version(qtbot) -> None:
+    settings = AppSettings()
+    window = MainWindow(
+        settings=settings,
+        serial_service=FakeSerialService(),
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    assert window.windowTitle() == settings.app_display_name
+    assert settings.app_version in window.hero_title_label.text()
 
 
 def test_flash_success_schedules_delayed_reconnect(qtbot, monkeypatch) -> None:

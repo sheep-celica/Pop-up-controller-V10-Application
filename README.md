@@ -13,8 +13,9 @@ See [LICENSE](LICENSE) for the full license text and [THIRD_PARTY_NOTICES.md](TH
 - Detect and connect to the controller over serial
 - Read controller build information, status, errors, manufacture data, and settings
 - Send direct control commands and protected service commands
-- Flash ESP32 firmware bundles
+- Flash ESP32 firmware bundles from `flash_bundle.zip` or `flash_manifest.json`
 - Package a standalone Windows executable with PyInstaller and bundled `esptool`
+- Stamp every git commit with an incremented application version via a repo hook
 
 ## Development setup
 
@@ -24,6 +25,18 @@ py -3.12 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -e .[dev]
 ```
+
+## Git hook setup
+
+The repository ships a tracked pre-commit hook in `.githooks\pre-commit`.
+
+Install it for your local clone with:
+
+```powershell
+scripts\install_git_hooks.ps1
+```
+
+Each commit bumps the patch version in `src\popup_controller\__init__.py` and `pyproject.toml`, starting from `1.0.0`.
 
 ## Flash bundle format
 
@@ -47,7 +60,8 @@ The script:
 
 - optionally runs the test suite first
 - runs PyInstaller with the checked-in spec file
-- bundles the Python `esptool` package inside the executable
+- embeds the app icon and bundles the Python `esptool` package inside the executable
+- writes a versioned executable such as `popup-controller-v1.0.0.exe`
 - copies `LICENSE`, `README.md`, and `THIRD_PARTY_NOTICES.md` into `dist\`
 - copies the local `firmware\` directory into `dist\firmware\`
 - copies available third-party license texts into `dist\third_party_licenses\`
@@ -66,6 +80,7 @@ Binary distributions of this application should be shared together with the corr
 
 ```text
 .
+|-- .githooks/
 |-- docs/
 |-- firmware/
 |-- scripts/

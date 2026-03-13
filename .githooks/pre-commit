@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+if [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
+    VERSION="$("$ROOT/.venv/Scripts/python.exe" scripts/versioning.py bump --stage)"
+elif command -v python >/dev/null 2>&1; then
+    VERSION="$(python scripts/versioning.py bump --stage)"
+elif command -v py >/dev/null 2>&1; then
+    VERSION="$(py -3 scripts/versioning.py bump --stage)"
+else
+    echo "Unable to find Python to bump the application version." >&2
+    exit 1
+fi
+
+echo "Bumped application version to $VERSION"
