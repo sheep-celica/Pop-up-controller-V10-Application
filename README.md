@@ -1,6 +1,7 @@
 ﻿# Pop-up Controller V10 Application
 
-Open-source PySide6 desktop application for communicating with and flashing an ESP32 pop-up controller over serial.
+Open-source PySide6 desktop application for communicating with and flashing an ESP32 on a Pop-up controller V10 over serial.
+All revisions of the V10 will be supported.
 
 ## License
 
@@ -13,9 +14,9 @@ See [LICENSE](LICENSE) for the full license text and [THIRD_PARTY_NOTICES.md](TH
 - Detect and connect to the controller over serial
 - Read controller build information, status, errors, manufacture data, and settings
 - Send direct control commands and protected service commands
-- Flash ESP32 firmware bundles from `flash_bundle.zip` or `flash_manifest.json`
+- Flash ESP32 firmware bundles from `pop_up_controller_v10_firmware_v_x.x.x.zip`
 - Package a standalone Windows executable with PyInstaller and bundled `esptool`
-- Stamp every git commit with an incremented application version via a repo hook
+- Stamp every git commit with an incremented application version via a repo hook (This is just for some basic versioning)
 
 ## Development setup
 
@@ -42,7 +43,7 @@ Each commit bumps the patch version in `src\popup_controller\__init__.py` and `p
 
 The flashing workflow expects either:
 
-- a `flash_bundle.zip` that contains `flash_manifest.json` plus the referenced binary images, or
+- a `pop_up_controller_v10_firmware_v_x.x.x.zip` that contains `flash_manifest.json` plus the referenced binary images, or
 - an extracted bundle directory, or
 - a standalone `flash_manifest.json` next to the referenced images.
 
