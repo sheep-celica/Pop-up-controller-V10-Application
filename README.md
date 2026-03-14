@@ -3,6 +3,10 @@
 Open-source PySide6 desktop application for communicating with and flashing an ESP32 on a Pop-up controller V10 over serial.
 All revisions of the V10 will be supported.
 
+Check releases for exe builds!  
+https://github.com/sheep-celica/Pop-up-controller-V10-Application/releases
+
+
 ## License
 
 This project is licensed under `GPL-2.0-or-later`.
