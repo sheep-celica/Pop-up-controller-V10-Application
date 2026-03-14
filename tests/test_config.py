@@ -11,4 +11,6 @@ def test_default_settings() -> None:
     assert settings.controller_probe_command == "help"
     assert settings.controller_probe_response_fragment == "Available commands:"
     assert settings.serial_poll_interval_ms > 0
+    assert settings.remote_mapping_reference_image_path.name == "remote_mapping.png"
+    assert settings.remote_mapping_reference_image_path.parent.name == "assets"
     assert settings.icon_path.name == "pop_up_icon.ico"

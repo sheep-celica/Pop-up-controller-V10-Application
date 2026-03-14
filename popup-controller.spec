@@ -19,8 +19,12 @@ if version_match is None:
 app_version = version_match.group("version")
 exe_name = f"popup-controller-v{app_version}"
 icon_path = project_root / "src" / "popup_controller" / "assets" / "pop_up_icon.ico"
+remote_mapping_reference_path = project_root / "src" / "popup_controller" / "assets" / "remote_mapping.png"
 esptool_datas, esptool_binaries, esptool_hiddenimports = collect_all("esptool")
-application_datas = [(str(icon_path), "popup_controller/assets")]
+application_datas = [
+    (str(icon_path), "popup_controller/assets"),
+    (str(remote_mapping_reference_path), "popup_controller/assets"),
+]
 
 analysis = Analysis(
     [str(project_root / "src" / "popup_controller" / "main.py")],

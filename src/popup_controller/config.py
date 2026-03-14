@@ -37,6 +37,9 @@ class AppSettings:
     default_window_width: int = 980
     default_window_height: int = 640
     firmware_directory: Path = field(default_factory=lambda: _default_runtime_directory() / "firmware")
+    remote_mapping_reference_image_path: Path = field(
+        default_factory=lambda: _default_package_directory() / "assets" / "remote_mapping.png"
+    )
     icon_path: Path = field(default_factory=lambda: _default_package_directory() / "assets" / "pop_up_icon.ico")
 
     @property

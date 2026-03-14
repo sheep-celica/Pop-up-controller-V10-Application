@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QEventLoop, Qt, QTimer
 from PySide6.QtGui import QDoubleValidator, QShowEvent
 from PySide6.QtWidgets import (
@@ -24,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
+from popup_controller.ui.remote_mapping_reference_dialog import RemoteMappingReferenceDialog
 from popup_controller.services.settings_service import (
     SettingsSnapshot,
     parse_battery_voltage_response,
@@ -35,9 +38,15 @@ REMOTE_INPUT_LABELS = ("RH Wink", "LH Wink", "Both Wink", "Toggle Sleepy Eye Mod
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, serial_service: SerialService, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        serial_service: SerialService,
+        parent: QWidget | None = None,
+        reference_image_path: Path | None = None,
+    ) -> None:
         super().__init__(parent)
         self.serial_service = serial_service
+        self.reference_image_path = reference_image_path or Path(__file__).resolve().parent.parent / "assets" / "remote_mapping.png"
         self._busy = False
         self._initial_load_scheduled = False
 
@@ -335,7 +344,7 @@ class SettingsDialog(QDialog):
         editor_layout.setVerticalSpacing(10)
         editor_layout.addWidget(
             self._create_section_note(
-                "Choose a unique input number between 1 and 4 for each remote action. Duplicate values are not allowed.",
+                "Choose a unique input number between 1 and 4 for each remote action. Duplicate values are not allowed. Use the reference button if you need the physical button layout image.",
                 editor,
             ),
             0,
@@ -345,6 +354,7 @@ class SettingsDialog(QDialog):
         )
 
         self.remote_input_combos = [self._create_remote_mapping_combo(editor) for _ in range(4)]
+        self.remote_mapping_reference_button = QPushButton("View reference image", editor)
         self.remote_mapping_update_button = QPushButton("Update mapping", editor)
 
         for index, (label_text, combo) in enumerate(zip(REMOTE_INPUT_LABELS, self.remote_input_combos), start=1):
@@ -353,8 +363,10 @@ class SettingsDialog(QDialog):
             editor_layout.addWidget(QLabel(label_text, editor), row, column)
             editor_layout.addWidget(combo, row, column + 1)
 
+        editor_layout.addWidget(self.remote_mapping_reference_button, 3, 2)
         editor_layout.addWidget(self.remote_mapping_update_button, 3, 3)
 
+        self.remote_mapping_reference_button.clicked.connect(self.show_remote_mapping_reference)
         self.remote_mapping_update_button.clicked.connect(self.update_remote_mapping)
         layout.addWidget(editor)
         return group
@@ -649,6 +661,18 @@ class SettingsDialog(QDialog):
             "Updating minimum state persistence...",
             "Minimum state persistence update failed",
         )
+
+    def show_remote_mapping_reference(self) -> None:
+        if not self.reference_image_path.is_file():
+            QMessageBox.warning(
+                self,
+                "Remote mapping reference",
+                f"Reference image not found: {self.reference_image_path}",
+            )
+            return
+
+        dialog = RemoteMappingReferenceDialog(self.reference_image_path, self)
+        dialog.exec()
 
     def update_remote_mapping(self) -> None:
         values = [int(combo.currentText()) for combo in self.remote_input_combos]

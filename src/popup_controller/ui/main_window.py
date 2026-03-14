@@ -338,7 +338,11 @@ class MainWindow(QMainWindow):
         elif section.section_id == "manufacture":
             dialog = ManufactureDialog(self.serial_service, self)
         elif section.section_id == "settings":
-            dialog = SettingsDialog(self.serial_service, self)
+            dialog = SettingsDialog(
+                self.serial_service,
+                self,
+                self.settings.remote_mapping_reference_image_path,
+            )
         elif section.section_id == "direct_controls":
             dialog = DirectControlsDialog(self.serial_service, self)
         elif section.section_id == "service":
