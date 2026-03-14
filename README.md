@@ -6,6 +6,7 @@ All revisions of the V10 will be supported.
 Check releases for exe builds!  
 https://github.com/sheep-celica/Pop-up-controller-V10-Application/releases
 
+![Screenshot](image_examples/app_example.png)
 
 ## License
 
