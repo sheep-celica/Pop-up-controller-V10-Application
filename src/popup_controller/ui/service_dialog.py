@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
+from popup_controller.ui.voltage_calibration_dialog import VoltageCalibrationDialog
 
 
 SERVICE_ACCESS_PASSWORD = "SE-aeemc2"
@@ -32,7 +33,7 @@ class ServiceDialog(QDialog):
         self._busy = False
 
         self.setWindowTitle("Service")
-        self.resize(860, 540)
+        self.resize(860, 680)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(18, 18, 18, 18)
@@ -42,7 +43,7 @@ class ServiceDialog(QDialog):
         title_label.setObjectName("dialogTitle")
 
         summary_label = QLabel(
-            "This protected dialog groups maintenance actions that can reset controller data or write production metadata.",
+            "This protected dialog groups maintenance actions that can reset controller data, write production metadata, and guide voltage calibration writes.",
             self,
         )
         summary_label.setObjectName("dialogSummary")
@@ -54,6 +55,7 @@ class ServiceDialog(QDialog):
 
         self.loading_frame = self._build_loading_frame()
         self.statistics_group = self._build_statistics_group()
+        self.voltage_calibration_group = self._build_voltage_calibration_group()
         self.manufacture_group = self._build_manufacture_group()
         buttons = self._build_buttons()
 
@@ -62,6 +64,7 @@ class ServiceDialog(QDialog):
         root_layout.addWidget(self.status_label)
         root_layout.addWidget(self.loading_frame)
         root_layout.addWidget(self.statistics_group)
+        root_layout.addWidget(self.voltage_calibration_group)
         root_layout.addWidget(self.manufacture_group)
         root_layout.addStretch(1)
         root_layout.addWidget(buttons)
@@ -112,6 +115,26 @@ class ServiceDialog(QDialog):
         layout.addWidget(QLabel("Controller password", group), 1, 0)
         layout.addWidget(self.clear_statistics_password_input, 1, 1)
         layout.addWidget(self.clear_statistics_button, 1, 2)
+        return group
+
+    def _build_voltage_calibration_group(self) -> QGroupBox:
+        group = QGroupBox("Voltage calibration", self)
+        layout = QGridLayout(group)
+        layout.setHorizontalSpacing(12)
+        layout.setVerticalSpacing(10)
+
+        note = QLabel(
+            "Open the guided voltage calibration workflow to capture measurement points, calculate a and b, and save those constants to the controller.",
+            group,
+        )
+        note.setObjectName("sectionNote")
+        note.setWordWrap(True)
+
+        self.open_voltage_calibration_button = QPushButton("Open voltage calibration", group)
+        self.open_voltage_calibration_button.clicked.connect(self.open_voltage_calibration_dialog)
+
+        layout.addWidget(note, 0, 0, 1, 2)
+        layout.addWidget(self.open_voltage_calibration_button, 1, 1)
         return group
 
     def _build_manufacture_group(self) -> QGroupBox:
@@ -193,6 +216,14 @@ class ServiceDialog(QDialog):
             "Controller statistical data clear command accepted.",
         )
 
+    def open_voltage_calibration_dialog(self) -> None:
+        if not self.serial_service.is_connected:
+            QMessageBox.information(self, "Connect first", "Connect to the controller before opening voltage calibration.")
+            return
+
+        dialog = VoltageCalibrationDialog(self.serial_service, self)
+        dialog.exec()
+
     def write_manufacture_data(self) -> None:
         values = {
             "serial number": self.serial_number_input.text().strip(),
@@ -273,6 +304,7 @@ class ServiceDialog(QDialog):
 
         self.loading_frame.setVisible(busy)
         self.statistics_group.setEnabled(not busy)
+        self.voltage_calibration_group.setEnabled(not busy)
         self.manufacture_group.setEnabled(not busy)
 
         if busy == self._busy:

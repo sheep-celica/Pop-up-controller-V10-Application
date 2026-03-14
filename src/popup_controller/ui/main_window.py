@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         )
         self.firmware_service = firmware_service or FirmwareService()
         self.section_buttons: dict[str, QPushButton] = {}
+        self._controller_operating_state: str | None = None
         self.setWindowTitle(settings.app_display_name)
         if settings.icon_path.is_file():
             self.setWindowIcon(QIcon(str(settings.icon_path)))
@@ -71,7 +72,9 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._connect_signals()
-        self._reset_port_selection("Press 'Find controller' to search.")
+        self._refresh_available_ports(
+            empty_message="No serial ports detected. Connect a board, then press 'Find controller' to search."
+        )
         self._update_connection_state()
 
     def _build_ui(self) -> None:
@@ -99,14 +102,14 @@ class MainWindow(QMainWindow):
         self.hero_title_label.setObjectName("heroTitle")
 
         self.hero_subtitle_label = QLabel(
-            "Find the controller, connect to it, then open focused dialogs for each controller section.",
+            "Find a running controller for live diagnostics, or choose any visible serial port to flash a fresh ESP32.",
             card,
         )
         self.hero_subtitle_label.setObjectName("heroSubtitle")
         self.hero_subtitle_label.setWordWrap(True)
 
         self.controller_details_label = QLabel(
-            "No controller selected yet. Once detected, connect to unlock the live controller sections.",
+            "No controller selected yet. Detect a running controller or pick a serial port below to flash firmware.",
             card,
         )
         self.controller_details_label.setObjectName("controllerBadge")
@@ -241,9 +244,12 @@ class MainWindow(QMainWindow):
             )
             return
 
-        available_ports = self.serial_service.available_ports()
+        selected_port = self.serial_service.port_name or self._selected_port()
+        available_ports = self._refresh_available_ports(
+            empty_message="No serial ports detected. Check the USB cable and try again.",
+            preferred_port=selected_port,
+        )
         if not available_ports:
-            self._reset_port_selection("No serial ports detected. Check the USB cable and try again.")
             self.controller_details_label.setText(
                 "No serial ports are currently visible to the application."
             )
@@ -277,11 +283,17 @@ class MainWindow(QMainWindow):
             self.find_controller_button.setEnabled(True)
 
         if result is None:
-            self._reset_port_selection("Controller not found. Press 'Find controller' to try again.")
             self._append_log("Controller was not found on the available COM ports.")
-            self.controller_details_label.setText(
-                "The scan completed, but no device answered with the expected controller response."
-            )
+            selected_port = self._selected_port()
+            if selected_port:
+                self.controller_details_label.setText(
+                    "The scan completed, but no device answered like a running controller. "
+                    f"You can still flash firmware directly to {selected_port} or choose another visible serial port."
+                )
+            else:
+                self.controller_details_label.setText(
+                    "The scan completed, but no device answered with the expected controller response."
+                )
             self._update_connection_state()
             return
 
@@ -308,6 +320,14 @@ class MainWindow(QMainWindow):
                 self,
                 "Connect first",
                 "Connect to the controller before opening a live section dialog.",
+            )
+            return
+
+        if section.section_id == "direct_controls" and self._controller_operating_state == "BENCH MODE":
+            QMessageBox.information(
+                self,
+                "Direct controls unavailable",
+                "Direct controls cannot be opened while the controller is in bench mode.",
             )
             return
 
@@ -518,8 +538,10 @@ class MainWindow(QMainWindow):
             return
 
         snapshot = parse_controller_status_snapshot(raw_response)
+        self._controller_operating_state = snapshot.state
         self.controller_state_value.setText(snapshot.state or "Unavailable")
         self.controller_state_value.setToolTip(snapshot.status_hint or "\n".join(snapshot.raw_lines))
+        self._update_section_button_states()
 
         if snapshot.state is not None:
             self._append_log(f"Controller state: {snapshot.state}.")
@@ -527,8 +549,10 @@ class MainWindow(QMainWindow):
             self._append_log(f"Controller state unavailable: {snapshot.status_hint}")
 
     def _clear_controller_state(self) -> None:
+        self._controller_operating_state = None
         self.controller_state_value.setText("--")
         self.controller_state_value.setToolTip("")
+        self._update_section_button_states()
 
     def _refresh_external_expander(self) -> None:
         if not self.serial_service.is_connected:
@@ -571,11 +595,12 @@ class MainWindow(QMainWindow):
             self.firmware_path_input.setText(selected_file)
 
     def flash_firmware(self) -> None:
-        if not self.serial_service.is_connected:
-            QMessageBox.information(self, "Connect first", "Connect to the controller before starting a firmware flash.")
+        selected_port = self.serial_service.port_name or self._selected_port() or ""
+        if not selected_port:
+            QMessageBox.warning(self, "No port selected", "Select a serial port before starting a firmware flash.")
             return
 
-        selected_port = self.serial_service.port_name or self._selected_port() or ""
+        was_connected = self.serial_service.is_connected
         firmware_path_text = self.firmware_path_input.text().strip()
         if not firmware_path_text:
             QMessageBox.warning(
@@ -586,16 +611,24 @@ class MainWindow(QMainWindow):
             return
 
         firmware_path = Path(firmware_path_text)
+        confirmation_message = (
+            f"Flash the selected firmware to {selected_port}? "
+            "The app will disconnect from the controller before esptool starts."
+            if was_connected
+            else f"Flash the selected firmware to {selected_port}? "
+            "The controller does not need to be connected before esptool starts."
+        )
         confirmation = QMessageBox.question(
             self,
             "Flash firmware",
-            f"Flash the selected firmware to {selected_port}? The app will disconnect from the controller before esptool starts.",
+            confirmation_message,
         )
         if confirmation != QMessageBox.StandardButton.Yes:
             return
 
         self._poll_timer.stop()
-        self.serial_service.disconnect()
+        if was_connected:
+            self.serial_service.disconnect()
         self._clear_build_info()
         self._clear_controller_state()
         self._clear_external_expander()
@@ -654,6 +687,29 @@ class MainWindow(QMainWindow):
             return None
         return str(value)
 
+    def _refresh_available_ports(
+        self,
+        empty_message: str,
+        preferred_port: str | None = None,
+    ) -> list:
+        available_ports = self.serial_service.available_ports()
+        if not available_ports:
+            self._reset_port_selection(empty_message)
+            return []
+
+        self.port_combo.clear()
+        for port_info in available_ports:
+            self.port_combo.addItem(f"{port_info.device} - {port_info.description}", port_info.device)
+
+        self.port_combo.setEnabled(True)
+
+        if preferred_port:
+            port_index = self.port_combo.findData(preferred_port)
+            if port_index >= 0:
+                self.port_combo.setCurrentIndex(port_index)
+
+        return available_ports
+
     def _reset_port_selection(self, message: str) -> None:
         self.port_combo.clear()
         self.port_combo.addItem(message, "")
@@ -670,17 +726,27 @@ class MainWindow(QMainWindow):
         if connected:
             status_text = f"Connected to {self.serial_service.port_name}"
         elif selected_port:
-            status_text = f"Ready to connect to {selected_port}"
+            status_text = f"Ready to connect or flash on {selected_port}"
         else:
             status_text = "Disconnected"
 
         self.status_label.setText(status_text)
         self.sections_group.setEnabled(connected)
-        self.firmware_group.setEnabled(connected)
-        self.connect_button.setEnabled(connected or selected_port is not None)
+        self._update_section_button_states()
+        self.firmware_group.setEnabled(connected or bool(selected_port))
+        self.connect_button.setEnabled(connected or bool(selected_port))
         self.reboot_button.setEnabled(connected)
         self.find_controller_button.setEnabled(not connected)
         self.statusBar().showMessage(status_text)
+
+    def _update_section_button_states(self) -> None:
+        direct_controls_button = self.section_buttons.get("direct_controls")
+        if direct_controls_button is None:
+            return
+
+        direct_controls_button.setEnabled(
+            self.serial_service.is_connected and self._controller_operating_state != "BENCH MODE"
+        )
 
     def _append_log(self, message: str) -> None:
         logger.info(message)
@@ -691,10 +757,3 @@ class MainWindow(QMainWindow):
         if self.serial_service.is_connected:
             self.serial_service.disconnect()
         event.accept()
-
-
-
-
-
-
-

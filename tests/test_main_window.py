@@ -7,15 +7,26 @@ from PySide6.QtWidgets import QMessageBox
 
 from popup_controller.config import AppSettings
 from popup_controller.services.firmware_service import FlashResult
+from popup_controller.services.serial_service import SerialPortInfo
+from popup_controller.ui import main_window as main_window_module
 from popup_controller.ui.main_window import MainWindow
+from popup_controller.ui.sections import SECTION_DEFINITIONS
 
 
 class FakeSerialService:
-    def __init__(self, port_name: str = "COM11") -> None:
+    def __init__(
+        self,
+        port_name: str = "COM11",
+        connected: bool = True,
+        available_ports: list[SerialPortInfo] | None = None,
+        request_responses: dict[str, str] | None = None,
+    ) -> None:
         self.baudrate = 115200
         self.timeout_seconds = 0.1
-        self._connected = True
+        self._connected = connected
         self._port_name = port_name
+        self._available_ports = list(available_ports or [])
+        self._request_responses = dict(request_responses or {})
         self.connect_calls: list[str] = []
         self.disconnect_calls = 0
 
@@ -37,14 +48,21 @@ class FakeSerialService:
         self._connected = False
 
     def available_ports(self):
-        return []
+        return list(self._available_ports)
 
     def read_available(self):
         return []
 
+    def request_text(self, command: str, **kwargs) -> str:
+        return self._request_responses.get(command, "")
+
 
 class FakeFirmwareService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Path]] = []
+
     def flash_firmware(self, port: str, firmware_path: Path) -> FlashResult:
+        self.calls.append((port, firmware_path))
         return FlashResult(True, f"Flashed test bundle to {port}.")
 
 
@@ -63,10 +81,11 @@ def test_main_window_shows_application_version(qtbot) -> None:
 
 def test_flash_success_schedules_delayed_reconnect(qtbot, monkeypatch) -> None:
     serial_service = FakeSerialService()
+    firmware_service = FakeFirmwareService()
     window = MainWindow(
         settings=AppSettings(),
         serial_service=serial_service,
-        firmware_service=FakeFirmwareService(),
+        firmware_service=firmware_service,
     )
     qtbot.addWidget(window)
 
@@ -94,6 +113,7 @@ def test_flash_success_schedules_delayed_reconnect(qtbot, monkeypatch) -> None:
     window.flash_firmware()
 
     assert serial_service.disconnect_calls == 1
+    assert firmware_service.calls == [("COM11", Path(window.firmware_path_input.text()))]
     assert scheduled["delay_ms"] == 3000
 
     callback = scheduled["callback"]
@@ -103,3 +123,119 @@ def test_flash_success_schedules_delayed_reconnect(qtbot, monkeypatch) -> None:
     assert serial_service.connect_calls == ["COM11"]
     assert serial_service.is_connected is True
     assert "Reconnected to COM11 after firmware flash" in window.controller_details_label.text()
+
+
+def test_flash_without_controller_connection_uses_selected_serial_port(qtbot, monkeypatch) -> None:
+    serial_service = FakeSerialService(
+        port_name="COM7",
+        connected=False,
+        available_ports=[SerialPortInfo(device="COM7", description="USB Serial Device")],
+    )
+    firmware_service = FakeFirmwareService()
+    window = MainWindow(
+        settings=AppSettings(),
+        serial_service=serial_service,
+        firmware_service=firmware_service,
+    )
+    qtbot.addWidget(window)
+
+    assert window.port_combo.currentData() == "COM7"
+    assert window.firmware_group.isEnabled() is True
+    assert window.status_label.text() == "Ready to connect or flash on COM7"
+
+    window.firmware_path_input.setText(str((Path.cwd() / "firmware" / "flash_bundle.zip").resolve()))
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.Ok)
+
+    monkeypatch.setattr(window, "_refresh_build_info", lambda: None)
+    monkeypatch.setattr(window, "_refresh_controller_state", lambda: None)
+    monkeypatch.setattr(window, "_refresh_external_expander", lambda: None)
+
+    scheduled: dict[str, object] = {}
+
+    def fake_single_shot(delay_ms: int, callback) -> None:
+        scheduled["delay_ms"] = delay_ms
+        scheduled["callback"] = callback
+
+    monkeypatch.setattr(QTimer, "singleShot", staticmethod(fake_single_shot))
+
+    window.flash_firmware()
+
+    assert serial_service.disconnect_calls == 0
+    assert firmware_service.calls == [("COM7", Path(window.firmware_path_input.text()))]
+    assert scheduled["delay_ms"] == 3000
+
+    callback = scheduled["callback"]
+    assert callable(callback)
+    callback()
+
+    assert serial_service.connect_calls == ["COM7"]
+    assert serial_service.is_connected is True
+    assert "Reconnected to COM7 after firmware flash" in window.controller_details_label.text()
+
+
+
+def test_direct_controls_button_is_disabled_in_bench_mode(qtbot) -> None:
+    serial_service = FakeSerialService(
+        connected=True,
+        request_responses={"getControllerStatus": "[66] Controller status: BENCH MODE\n"},
+    )
+    window = MainWindow(
+        settings=AppSettings(),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    window._refresh_controller_state()
+
+    assert window.controller_state_value.text() == "BENCH MODE"
+    assert window.section_buttons["direct_controls"].isEnabled() is False
+
+
+def test_direct_controls_dialog_is_blocked_in_bench_mode(qtbot, monkeypatch) -> None:
+    serial_service = FakeSerialService(
+        connected=True,
+        request_responses={"getControllerStatus": "[66] Controller status: BENCH MODE\n"},
+    )
+    window = MainWindow(
+        settings=AppSettings(),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+    window._refresh_controller_state()
+
+    messages: list[tuple[str, str]] = []
+
+    def fake_information(parent, title, text):
+        messages.append((title, text))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "information", fake_information)
+
+    opened = {"value": False}
+
+    class DummyDirectControlsDialog:
+        def __init__(self, *args, **kwargs) -> None:
+            opened["value"] = True
+
+        def exec(self) -> int:
+            return 0
+
+    monkeypatch.setattr(main_window_module, "DirectControlsDialog", DummyDirectControlsDialog)
+
+    direct_controls_section = next(
+        section for section in SECTION_DEFINITIONS if section.section_id == "direct_controls"
+    )
+    window.open_section_dialog(direct_controls_section)
+
+    assert opened["value"] is False
+    assert messages == [
+        (
+            "Direct controls unavailable",
+            "Direct controls cannot be opened while the controller is in bench mode.",
+        )
+    ]
