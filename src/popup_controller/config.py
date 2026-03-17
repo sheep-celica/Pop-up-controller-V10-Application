@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +37,8 @@ class AppSettings:
     default_window_width: int = 980
     default_window_height: int = 640
     firmware_directory: Path = field(default_factory=lambda: _default_runtime_directory() / "firmware")
+    firmware_release_api_url: str = "https://api.github.com/repos/sheep-celica/pop-up-controller-v10/releases"
+    auto_check_latest_firmware_on_startup: bool = True
     remote_mapping_reference_image_path: Path = field(
         default_factory=lambda: _default_package_directory() / "assets" / "remote_mapping.png"
     )

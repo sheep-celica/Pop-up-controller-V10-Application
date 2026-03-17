@@ -123,6 +123,7 @@ class SettingsDialog(QDialog):
         self.sleepy_eye_group = self._build_sleepy_eye_group()
         self.idle_power_group = self._build_idle_power_group()
         self.min_state_group = self._build_min_state_group()
+        self.sensing_delay_group = self._build_sensing_delay_group()
         self.remote_mapping_group = self._build_remote_mapping_group()
         self.timing_group = self._build_timing_group()
 
@@ -130,6 +131,7 @@ class SettingsDialog(QDialog):
         content_layout.addWidget(self.sleepy_eye_group)
         content_layout.addWidget(self.idle_power_group)
         content_layout.addWidget(self.min_state_group)
+        content_layout.addWidget(self.sensing_delay_group)
         content_layout.addWidget(self.remote_mapping_group)
         content_layout.addWidget(self.timing_group)
         content_layout.addStretch(1)
@@ -304,7 +306,7 @@ class SettingsDialog(QDialog):
         editor_layout.setVerticalSpacing(10)
         editor_layout.addWidget(
             self._create_section_note(
-                "This firmware option may be hidden or unsupported on some versions. You can still provide a new value to try writing.",
+                "This is the minimum amount of time a pop-up state signal needs to persist (UP/DOWN) before it becomes valid.",
                 editor,
             ),
             0,
@@ -325,6 +327,45 @@ class SettingsDialog(QDialog):
         layout.addWidget(editor)
         return group
 
+    def _build_sensing_delay_group(self) -> QGroupBox:
+        group = QGroupBox("Pop-up sensing delay", self.content_widget)
+        layout = QVBoxLayout(group)
+        layout.setSpacing(10)
+
+        layout.addWidget(self._create_section_heading("Current settings", group))
+        current_row = QHBoxLayout()
+        current_row.setSpacing(12)
+        current_row.addWidget(self._create_metric_card("Microseconds", "sensing_delay", "controller-reported value"))
+        current_row.addStretch(1)
+        layout.addLayout(current_row)
+
+        layout.addWidget(self._create_section_heading("New settings", group))
+        editor = self._create_editor_card(group)
+        editor_layout = QGridLayout(editor)
+        editor_layout.setHorizontalSpacing(12)
+        editor_layout.setVerticalSpacing(10)
+        editor_layout.addWidget(
+            self._create_section_note(
+                "This is the sensing delay used before the controller evaluates the pop-up position sensing input.",
+                editor,
+            ),
+            0,
+            0,
+            1,
+            4,
+        )
+
+        self.sensing_delay_spin = QSpinBox(editor)
+        self.sensing_delay_spin.setRange(0, 1000000)
+        self.sensing_delay_update_button = QPushButton("Update value", editor)
+
+        editor_layout.addWidget(QLabel("New microseconds", editor), 1, 0)
+        editor_layout.addWidget(self.sensing_delay_spin, 1, 1)
+        editor_layout.addWidget(self.sensing_delay_update_button, 1, 3)
+
+        self.sensing_delay_update_button.clicked.connect(self.update_sensing_delay)
+        layout.addWidget(editor)
+        return group
     def _build_remote_mapping_group(self) -> QGroupBox:
         group = QGroupBox("Remote input mapping", self.content_widget)
         layout = QVBoxLayout(group)
@@ -500,11 +541,18 @@ class SettingsDialog(QDialog):
                 max_duration_seconds=2.0,
                 progress_callback=self._process_loading_events,
             )
+            sensing_delay_response = self.serial_service.request_text(
+                "printPopUpSensingDelayUs",
+                idle_timeout_seconds=0.35,
+                max_duration_seconds=2.0,
+                progress_callback=self._process_loading_events,
+            )
             snapshot = parse_settings_snapshot(
                 full_response,
                 min_state_response,
                 remote_input_response,
                 idle_power_response,
+                sensing_delay_response=sensing_delay_response,
             )
             self._apply_snapshot(snapshot)
             self.status_label.setText(self._build_status_message(snapshot))
@@ -551,6 +599,12 @@ class SettingsDialog(QDialog):
         if snapshot.min_state_persist_ms is not None:
             self.min_state_spin.setValue(snapshot.min_state_persist_ms)
 
+        sensing_delay_value = f"{snapshot.sensing_delay_us:,} us" if snapshot.sensing_delay_us is not None else "Unavailable"
+        sensing_delay_suffix = snapshot.sensing_delay_status or "controller-reported value"
+        self._set_metric_card("sensing_delay", sensing_delay_value, sensing_delay_suffix)
+        if snapshot.sensing_delay_us is not None:
+            self.sensing_delay_spin.setValue(snapshot.sensing_delay_us)
+
         if snapshot.remote_input_mapping is None:
             self._set_metric_card("remote_mapping", "Unavailable", snapshot.remote_input_mapping_status)
         else:
@@ -573,6 +627,8 @@ class SettingsDialog(QDialog):
         warnings: list[str] = []
         if snapshot.min_state_persist_ms is None and snapshot.min_state_persist_status:
             warnings.append(snapshot.min_state_persist_status)
+        if snapshot.sensing_delay_us is None and snapshot.sensing_delay_status:
+            warnings.append(snapshot.sensing_delay_status)
         if snapshot.remote_input_mapping is None and snapshot.remote_input_mapping_status:
             warnings.append(snapshot.remote_input_mapping_status)
         if warnings:
@@ -660,6 +716,14 @@ class SettingsDialog(QDialog):
             f"writePopUpMinStatePersistMs {milliseconds}",
             "Updating minimum state persistence...",
             "Minimum state persistence update failed",
+        )
+
+    def update_sensing_delay(self) -> None:
+        microseconds = self.sensing_delay_spin.value()
+        self._submit_update_command(
+            f"writePopUpSensingDelayUs {microseconds}",
+            "Updating pop-up sensing delay...",
+            "Pop-up sensing delay update failed",
         )
 
     def show_remote_mapping_reference(self) -> None:

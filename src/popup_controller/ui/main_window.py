@@ -1,10 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QIcon
+from PySide6.QtGui import QCloseEvent, QIcon, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -31,7 +31,9 @@ from popup_controller.services.build_info_service import parse_build_info_snapsh
 from popup_controller.services.external_expander_service import parse_external_expander_snapshot
 from popup_controller.services.controller_status_service import parse_controller_status_snapshot
 from popup_controller.services.firmware_service import FirmwareService
+from popup_controller.services.firmware_release_service import FirmwareReleaseError, FirmwareReleaseInfo, FirmwareReleaseService
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
+from popup_controller.services.temperature_service import parse_temperature_snapshot
 from popup_controller.ui.direct_controls_dialog import DirectControlsDialog
 from popup_controller.ui.errors_dialog import ErrorsDialog
 from popup_controller.ui.manufacture_dialog import ManufactureDialog
@@ -52,6 +54,7 @@ class MainWindow(QMainWindow):
         settings: AppSettings,
         serial_service: SerialService | None = None,
         firmware_service: FirmwareService | None = None,
+        firmware_release_service: FirmwareReleaseService | None = None,
     ) -> None:
         super().__init__()
         self.settings = settings
@@ -60,6 +63,11 @@ class MainWindow(QMainWindow):
             timeout_seconds=settings.serial_timeout_seconds,
         )
         self.firmware_service = firmware_service or FirmwareService()
+        self.firmware_release_service = firmware_release_service or FirmwareReleaseService(
+            settings.firmware_release_api_url
+        )
+        self._latest_firmware_release: FirmwareReleaseInfo | None = None
+        self._startup_firmware_check_scheduled = False
         self.section_buttons: dict[str, QPushButton] = {}
         self._controller_operating_state: str | None = None
         self.setWindowTitle(settings.app_display_name)
@@ -77,6 +85,18 @@ class MainWindow(QMainWindow):
         )
         self._update_connection_state()
 
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._startup_firmware_check_scheduled or not self.settings.auto_check_latest_firmware_on_startup:
+            return
+
+        self._startup_firmware_check_scheduled = True
+        self.latest_firmware_status_label.setText("Checking latest GitHub release...")
+        self.latest_firmware_status_label.setToolTip("")
+        QTimer.singleShot(0, self._auto_refresh_latest_firmware)
+
+    def _auto_refresh_latest_firmware(self) -> None:
+        self._fetch_latest_firmware_release(show_error_dialog=False)
     def _build_ui(self) -> None:
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
@@ -98,7 +118,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(10)
 
-        self.hero_title_label = QLabel(f"ESP32 Pop-up Controller v{self.settings.app_version}", card)
+        self.hero_title_label = QLabel(f"Pop-up Controller V10 Application v{self.settings.app_version}", card)
         self.hero_title_label.setObjectName("heroTitle")
 
         self.hero_subtitle_label = QLabel(
@@ -121,6 +141,7 @@ class MainWindow(QMainWindow):
         info_row.addWidget(self._create_header_info_card("Build date", "--", "build_date"))
         info_row.addWidget(self._create_header_info_card("Controller state", "--", "controller_state"))
         info_row.addWidget(self._create_header_info_card("External expander", "--", "external_expander"))
+        info_row.addWidget(self._create_header_info_card("Temperature", "--", "temperature"))
         info_row.addStretch(1)
 
         layout.addWidget(self.hero_title_label)
@@ -213,6 +234,23 @@ class MainWindow(QMainWindow):
         row_layout.addWidget(self.flash_button)
 
         layout.addRow("Firmware file", row)
+
+        latest_row = QWidget(self.firmware_group)
+        latest_row_layout = QHBoxLayout(latest_row)
+        latest_row_layout.setContentsMargins(0, 0, 0, 0)
+        latest_row_layout.setSpacing(8)
+
+        self.latest_firmware_status_label = QLabel("Not checked yet.", latest_row)
+        self.latest_firmware_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.latest_firmware_status_label.setWordWrap(True)
+        self.check_latest_firmware_button = QPushButton("Check latest", latest_row)
+        self.download_latest_firmware_button = QPushButton("Download latest", latest_row)
+
+        latest_row_layout.addWidget(self.latest_firmware_status_label, stretch=1)
+        latest_row_layout.addWidget(self.check_latest_firmware_button)
+        latest_row_layout.addWidget(self.download_latest_firmware_button)
+
+        layout.addRow("GitHub release", latest_row)
         return self.firmware_group
 
     def _build_feedback_group(self) -> QGroupBox:
@@ -229,6 +267,8 @@ class MainWindow(QMainWindow):
         self.reboot_button.clicked.connect(self.reboot_controller)
         self.browse_firmware_button.clicked.connect(self.browse_firmware)
         self.flash_button.clicked.connect(self.flash_firmware)
+        self.check_latest_firmware_button.clicked.connect(self.refresh_latest_firmware)
+        self.download_latest_firmware_button.clicked.connect(self.download_latest_firmware)
 
         for section in SECTION_DEFINITIONS:
             self.section_buttons[section.section_id].clicked.connect(
@@ -369,6 +409,7 @@ class MainWindow(QMainWindow):
             self._clear_build_info()
             self._clear_controller_state()
             self._clear_external_expander()
+            self._clear_temperature()
             self._append_log("Disconnected from serial port.")
             self.controller_details_label.setText(
                 f"Disconnected from {current_port}. Reconnect to use the live controller sections again."
@@ -407,6 +448,7 @@ class MainWindow(QMainWindow):
         self._refresh_build_info()
         self._refresh_controller_state()
         self._refresh_external_expander()
+        self._refresh_temperature()
         self._poll_timer.start()
         self._update_connection_state()
         return True
@@ -587,6 +629,124 @@ class MainWindow(QMainWindow):
         self.external_expander_value.setText("--")
         self.external_expander_value.setToolTip("")
 
+    def _refresh_temperature(self) -> None:
+        if not self.serial_service.is_connected:
+            self._clear_temperature()
+            return
+
+        try:
+            raw_response = self.serial_service.request_text(
+                "readTemperature",
+                idle_timeout_seconds=0.35,
+                max_duration_seconds=2.0,
+            )
+        except SerialConnectionError as exc:
+            self._clear_temperature()
+            self._append_log(f"Temperature read failed: {exc}")
+            return
+
+        snapshot = parse_temperature_snapshot(raw_response)
+        display_value = "Unavailable"
+        if snapshot.temperature_c is not None:
+            display_value = f"{snapshot.temperature_c:.2f} C"
+
+        self.temperature_value.setText(display_value)
+        self.temperature_value.setToolTip(snapshot.status_hint or "\n".join(snapshot.raw_lines))
+
+        if snapshot.temperature_c is not None:
+            self._append_log(f"Temperature: {snapshot.temperature_c:.2f} C.")
+        else:
+            self._append_log(f"Temperature unavailable: {snapshot.status_hint}")
+
+    def _clear_temperature(self) -> None:
+        self.temperature_value.setText("--")
+        self.temperature_value.setToolTip("")
+
+    def refresh_latest_firmware(self) -> None:
+        self._fetch_latest_firmware_release(show_error_dialog=True)
+
+    def _fetch_latest_firmware_release(self, show_error_dialog: bool) -> FirmwareReleaseInfo | None:
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        self.statusBar().showMessage("Checking latest firmware release on GitHub...")
+        QApplication.processEvents()
+        try:
+            release = self.firmware_release_service.fetch_latest_release()
+        except FirmwareReleaseError as exc:
+            self.latest_firmware_status_label.setText("Latest GitHub release unavailable.")
+            self.latest_firmware_status_label.setToolTip(str(exc))
+            self._append_log(f"GitHub firmware lookup failed: {exc}")
+            self.statusBar().showMessage("GitHub firmware lookup failed.")
+            if show_error_dialog:
+                QMessageBox.warning(self, "Firmware release", str(exc))
+            return None
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        self._latest_firmware_release = release
+        self.latest_firmware_status_label.setText(self._describe_latest_firmware_release(release))
+        self.latest_firmware_status_label.setToolTip(
+            "\n".join(
+                line
+                for line in (release.release_name or None, release.html_url, release.download_url)
+                if line
+            )
+        )
+        self._append_log(f"Latest GitHub firmware: {self._release_version_text(release)} ({release.asset_name}).")
+        self.statusBar().showMessage(f"Latest GitHub firmware: {self._release_version_text(release)}")
+        return release
+
+    def download_latest_firmware(self) -> None:
+        release = self._latest_firmware_release or self._fetch_latest_firmware_release(show_error_dialog=True)
+        if release is None:
+            return
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        self.statusBar().showMessage(f"Downloading {self._release_version_text(release)} from GitHub...")
+        QApplication.processEvents()
+        try:
+            result = self.firmware_release_service.download_release_asset(release, self.settings.firmware_directory)
+        except FirmwareReleaseError as exc:
+            self._append_log(f"GitHub firmware download failed: {exc}")
+            self.statusBar().showMessage("GitHub firmware download failed.")
+            QMessageBox.warning(self, "Download latest firmware", str(exc))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        self.firmware_path_input.setText(str(result.path))
+        action_text = "Downloaded" if result.downloaded else "Using cached copy of"
+        version_text = self._release_version_text(release)
+        self._append_log(f"{action_text} GitHub firmware {version_text} at {result.path}.")
+        selected_port = self.serial_service.port_name or self._selected_port()
+        if selected_port:
+            self.controller_details_label.setText(
+                f"{action_text} {version_text} from GitHub. Ready to flash it to {selected_port}."
+            )
+        else:
+            self.controller_details_label.setText(
+                f"{action_text} {version_text} from GitHub. Select a serial port when you're ready to flash it."
+            )
+        self.statusBar().showMessage(f"{action_text} {version_text} from GitHub.")
+
+    def _describe_latest_firmware_release(self, release: FirmwareReleaseInfo) -> str:
+        published_date = ""
+        if release.published_at:
+            published_date = release.published_at.split("T", 1)[0]
+
+        description = f"{self._release_version_text(release)} - {release.asset_name}"
+        if published_date:
+            description = f"{description} ({published_date})"
+        return description
+
+    def _release_version_text(self, release: FirmwareReleaseInfo) -> str:
+        if release.version:
+            return f"v{release.version}"
+        if release.release_name:
+            return release.release_name
+        if release.tag_name:
+            return release.tag_name
+        return release.asset_name
+
     def browse_firmware(self) -> None:
         start_dir = str(self.settings.firmware_directory.resolve())
         selected_file, _ = QFileDialog.getOpenFileName(
@@ -636,6 +796,7 @@ class MainWindow(QMainWindow):
         self._clear_build_info()
         self._clear_controller_state()
         self._clear_external_expander()
+        self._clear_temperature()
         self.controller_details_label.setText(
             f"Preparing firmware flash on {selected_port}. Wait for the controller to reboot after flashing completes."
         )
@@ -675,6 +836,7 @@ class MainWindow(QMainWindow):
             self._clear_build_info()
             self._clear_controller_state()
             self._clear_external_expander()
+            self._clear_temperature()
             self.controller_details_label.setText(
                 "The controller connection was lost while reading serial feedback."
             )
@@ -721,6 +883,7 @@ class MainWindow(QMainWindow):
         self._clear_build_info()
         self._clear_controller_state()
         self._clear_external_expander()
+        self._clear_temperature()
 
     def _update_connection_state(self) -> None:
         connected = self.serial_service.is_connected
@@ -737,7 +900,8 @@ class MainWindow(QMainWindow):
         self.status_label.setText(status_text)
         self.sections_group.setEnabled(connected)
         self._update_section_button_states()
-        self.firmware_group.setEnabled(connected or bool(selected_port))
+        self.firmware_group.setEnabled(True)
+        self.flash_button.setEnabled(connected or bool(selected_port))
         self.connect_button.setEnabled(connected or bool(selected_port))
         self.reboot_button.setEnabled(connected)
         self.find_controller_button.setEnabled(not connected)

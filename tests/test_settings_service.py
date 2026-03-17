@@ -1,4 +1,4 @@
-﻿from popup_controller.services.settings_service import parse_battery_voltage_response, parse_settings_snapshot
+from popup_controller.services.settings_service import parse_battery_voltage_response, parse_settings_snapshot
 
 
 SETTINGS_RESPONSE = """[2185144] printEverything command received.
@@ -51,6 +51,14 @@ CURRENT_IDLE_POWER_RESPONSE = """[51018] 86400
 """
 
 
+CURRENT_SENSING_DELAY_RESPONSE = """[51018] POP_UP_SENSING_DELAY_US=1000
+"""
+
+
+LEGACY_SENSING_DELAY_RESPONSE = """[51018] Pop-up sensing delay: 300 us
+"""
+
+
 BATTERY_VOLTAGE_RESPONSE = """[275168] Battery voltage [1/5]: 2.85 V
 [275671] Battery voltage [2/5]: 2.85 V
 [276174] Battery voltage [3/5]: 2.85 V
@@ -72,6 +80,8 @@ def test_parse_settings_snapshot_extracts_expected_values() -> None:
     assert snapshot.battery_voltage_v == 2.87
     assert snapshot.min_state_persist_ms is None
     assert "unavailable" in snapshot.min_state_persist_status.lower()
+    assert snapshot.sensing_delay_us is None
+    assert "unavailable" in snapshot.sensing_delay_status.lower()
     assert snapshot.remote_input_mapping is None
     assert snapshot.rh_timing.display_text.startswith("Supported range")
     assert "Populated buckets: 8/41" in snapshot.lh_timing.display_text
@@ -96,13 +106,29 @@ def test_parse_settings_snapshot_supports_current_firmware_formats() -> None:
         CURRENT_FIRMWARE_MIN_STATE_RESPONSE,
         CURRENT_REMOTE_MAPPING_RESPONSE,
         CURRENT_IDLE_POWER_RESPONSE,
+        CURRENT_SENSING_DELAY_RESPONSE,
     )
 
     assert snapshot.idle_power_off_seconds == 86400
     assert snapshot.min_state_persist_ms == 5
     assert snapshot.min_state_persist_status == ""
+    assert snapshot.sensing_delay_us == 1000
+    assert snapshot.sensing_delay_status == ""
     assert snapshot.remote_input_mapping == (4, 3, 2, 1)
     assert snapshot.remote_input_mapping_status == ""
+
+
+def test_parse_settings_snapshot_supports_legacy_sensing_delay_format() -> None:
+    snapshot = parse_settings_snapshot(
+        SETTINGS_RESPONSE,
+        CURRENT_FIRMWARE_MIN_STATE_RESPONSE,
+        CURRENT_REMOTE_MAPPING_RESPONSE,
+        CURRENT_IDLE_POWER_RESPONSE,
+        LEGACY_SENSING_DELAY_RESPONSE,
+    )
+
+    assert snapshot.sensing_delay_us == 300
+    assert snapshot.sensing_delay_status == ""
 
 
 def test_parse_battery_voltage_response_prefers_latest_average_line() -> None:

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 import re
@@ -25,6 +25,11 @@ _REMOTE_INPUTS_RE = re.compile(
     re.IGNORECASE,
 )
 _MIN_STATE_MS_RE = re.compile(r"(?:MIN_STATE_PERSIST_MS\s*=\s*)?(?P<value>\d+)(?:\s*ms)?\b", re.IGNORECASE)
+_SENSING_DELAY_US_RE = re.compile(
+    r"(?:POP_UP_SENSING_DELAY_US\s*=\s*|(?:Pop-up\s+)?sensing delay(?:\s+us)?\s*[:=]\s*)?"
+    r"(?P<value>\d+)(?:\s*(?:us|microseconds?))?\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +54,8 @@ class SettingsSnapshot:
     idle_power_off_seconds: int | None
     min_state_persist_ms: int | None
     min_state_persist_status: str
+    sensing_delay_us: int | None
+    sensing_delay_status: str
     remote_input_mapping: tuple[int, int, int, int] | None
     remote_input_mapping_status: str
     rh_timing: TimingCalibrationBlock
@@ -67,6 +74,7 @@ def parse_settings_snapshot(
     min_state_response: str | None = None,
     remote_input_response: str | None = None,
     idle_power_response: str | None = None,
+    sensing_delay_response: str | None = None,
 ) -> SettingsSnapshot:
     lines = tuple(_normalize_lines(raw_response))
 
@@ -84,7 +92,8 @@ def parse_settings_snapshot(
         title="LH",
         lines=_extract_section(lines, "---- LH Pop-up Timing Calibration ----"),
     )
-    min_state_persist_ms, min_state_persist_status = _parse_min_state_response(min_state_response)
+    min_state_persist_ms, min_state_persist_status = _parse_value_response(min_state_response, _MIN_STATE_MS_RE)
+    sensing_delay_us, sensing_delay_status = _parse_value_response(sensing_delay_response, _SENSING_DELAY_US_RE)
 
     return SettingsSnapshot(
         battery_calibration_a=battery_calibration_a,
@@ -95,6 +104,8 @@ def parse_settings_snapshot(
         idle_power_off_seconds=idle_power_off_seconds,
         min_state_persist_ms=min_state_persist_ms,
         min_state_persist_status=min_state_persist_status,
+        sensing_delay_us=sensing_delay_us,
+        sensing_delay_status=sensing_delay_status,
         remote_input_mapping=remote_input_mapping,
         remote_input_mapping_status=remote_input_mapping_status,
         rh_timing=rh_timing,
@@ -224,7 +235,7 @@ def _extract_section(lines: tuple[str, ...], header: str) -> tuple[str, ...]:
     return tuple(section_lines)
 
 
-def _parse_min_state_response(raw_response: str | None) -> tuple[int | None, str]:
+def _parse_value_response(raw_response: str | None, pattern: re.Pattern[str]) -> tuple[int | None, str]:
     if raw_response is None or not raw_response.strip():
         return None, "Current value unavailable on this firmware."
 
@@ -236,7 +247,7 @@ def _parse_min_state_response(raw_response: str | None) -> tuple[int | None, str
         return None, "Controller reports this command as a placeholder."
 
     for line in lines:
-        match = _MIN_STATE_MS_RE.search(line)
+        match = pattern.search(line)
         if match is not None:
             return int(match.group("value")), ""
         if line.isdigit():

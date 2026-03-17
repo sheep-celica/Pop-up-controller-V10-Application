@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -13,10 +13,20 @@ from popup_controller.ui.sections import SECTION_DEFINITIONS
 from popup_controller.ui.settings_dialog import SettingsDialog
 
 
+SETTINGS_RESPONSE = """[2185281] Battery voltage calibration constants: a=1.001585, b=0.097071
+[2185291] ALLOW_SLEEPY_EYE_MODE_WITH_HEADLIGHTS=TRUE
+[2185291] Idle power-off threshold: 86400 s.
+[2185303] Temperature: 22.50 C
+[2185306] Battery voltage: 2.87 V
+"""
+
+
 class FakeSerialService:
-    def __init__(self, connected: bool = True) -> None:
+    def __init__(self, connected: bool = True, request_responses: dict[str, str] | None = None) -> None:
         self._connected = connected
         self.baudrate = 115200
+        self._request_responses = dict(request_responses or {})
+        self.request_calls: list[str] = []
 
     @property
     def is_connected(self) -> bool:
@@ -33,7 +43,8 @@ class FakeSerialService:
         return []
 
     def request_text(self, command: str, **kwargs) -> str:
-        return ""
+        self.request_calls.append(command)
+        return self._request_responses.get(command, "")
 
     def connect(self, port: str) -> None:
         self._connected = True
@@ -133,4 +144,48 @@ def test_main_window_passes_remote_mapping_reference_path_to_settings_dialog(qtb
         "parent": window,
         "reference_image_path": reference_image_path,
         "executed": True,
+    }
+
+
+def test_settings_dialog_loads_sensing_delay_setting(qtbot) -> None:
+    serial_service = FakeSerialService(
+        request_responses={
+            "printEverything": SETTINGS_RESPONSE,
+            "getIdleTimeToPowerOff": "[51018] 86400\n",
+            "printPopUpMinStatePersistMs": "[273808] MIN_STATE_PERSIST_MS=5\n",
+            "printRemoteInputPins": "[274258] REMOTE_INPUT_PINS=4 3 2 1\n",
+            "printPopUpSensingDelayUs": "[51018] POP_UP_SENSING_DELAY_US=1000\n",
+        }
+    )
+    dialog = SettingsDialog(serial_service=serial_service)
+    qtbot.addWidget(dialog)
+
+    dialog.load_settings()
+
+    assert "printPopUpSensingDelayUs" in serial_service.request_calls
+    assert dialog.sensing_delay_value.text() == "1,000 us"
+    assert dialog.sensing_delay_spin.value() == 1000
+
+
+def test_settings_dialog_updates_sensing_delay_with_expected_command(qtbot, monkeypatch) -> None:
+    dialog = SettingsDialog(serial_service=FakeSerialService())
+    qtbot.addWidget(dialog)
+
+    captured: dict[str, str] = {}
+
+    def fake_submit(command: str, busy_message: str, error_title: str) -> bool:
+        captured["command"] = command
+        captured["busy_message"] = busy_message
+        captured["error_title"] = error_title
+        return True
+
+    monkeypatch.setattr(dialog, "_submit_update_command", fake_submit)
+    dialog.sensing_delay_spin.setValue(1234)
+
+    dialog.update_sensing_delay()
+
+    assert captured == {
+        "command": "writePopUpSensingDelayUs 1234",
+        "busy_message": "Updating pop-up sensing delay...",
+        "error_title": "Pop-up sensing delay update failed",
     }
