@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
 from popup_controller.services.settings_service import parse_battery_voltage_response
+from popup_controller.ui.window_helpers import apply_initial_window_size, create_scrollable_dialog_layout
 from popup_controller.services.voltage_calibration_service import (
     VoltageCalibrationError,
     VoltageCalibrationResult,
@@ -44,11 +45,8 @@ class AddVoltageMeasurementDialog(QDialog):
         self._busy = False
 
         self.setWindowTitle("Add voltage calibration point")
-        self.resize(520, 260)
 
-        root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(18, 18, 18, 18)
-        root_layout.setSpacing(12)
+        root_layout, content_layout, self.scroll_area = create_scrollable_dialog_layout(self)
 
         title_label = QLabel("Add voltage calibration point", self)
         title_label.setObjectName("dialogTitle")
@@ -68,15 +66,16 @@ class AddVoltageMeasurementDialog(QDialog):
         editor = self._build_editor_card()
         buttons = self._build_buttons()
 
-        root_layout.addWidget(title_label)
-        root_layout.addWidget(summary_label)
-        root_layout.addWidget(self.status_label)
-        root_layout.addWidget(self.loading_frame)
-        root_layout.addWidget(editor)
-        root_layout.addStretch(1)
+        content_layout.addWidget(title_label)
+        content_layout.addWidget(summary_label)
+        content_layout.addWidget(self.status_label)
+        content_layout.addWidget(self.loading_frame)
+        content_layout.addWidget(editor)
+        content_layout.addStretch(1)
         root_layout.addWidget(buttons)
 
         self._set_busy(False)
+        apply_initial_window_size(self, 520, 260)
 
     def _build_loading_frame(self) -> QFrame:
         frame = QFrame(self)
@@ -213,11 +212,8 @@ class VoltageCalibrationDialog(QDialog):
         self._calibration_result: VoltageCalibrationResult | None = None
 
         self.setWindowTitle("Voltage calibration")
-        self.resize(860, 620)
 
-        root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(18, 18, 18, 18)
-        root_layout.setSpacing(12)
+        root_layout, content_layout, self.scroll_area = create_scrollable_dialog_layout(self)
 
         title_label = QLabel("Voltage calibration", self)
         title_label.setObjectName("dialogTitle")
@@ -238,15 +234,17 @@ class VoltageCalibrationDialog(QDialog):
         self.results_group = self._build_results_group()
         buttons = self._build_buttons()
 
-        root_layout.addWidget(title_label)
-        root_layout.addWidget(summary_label)
-        root_layout.addWidget(self.status_label)
-        root_layout.addWidget(self.loading_frame)
-        root_layout.addWidget(self.measurements_group, stretch=1)
-        root_layout.addWidget(self.results_group)
+        content_layout.addWidget(title_label)
+        content_layout.addWidget(summary_label)
+        content_layout.addWidget(self.status_label)
+        content_layout.addWidget(self.loading_frame)
+        content_layout.addWidget(self.measurements_group)
+        content_layout.addWidget(self.results_group)
+        content_layout.addStretch(1)
         root_layout.addWidget(buttons)
 
         self._set_busy(False)
+        apply_initial_window_size(self, 860, 620)
         self._update_table()
         self._set_calibration_result(None)
 

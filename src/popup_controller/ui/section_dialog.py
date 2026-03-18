@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QGroupBox, QLabel, QVBoxLayout, QWidget
 
 from popup_controller.ui.sections import SectionDefinition
+from popup_controller.ui.window_helpers import apply_initial_window_size, create_scrollable_dialog_layout
 
 
 class SectionDialog(QDialog):
@@ -11,11 +12,8 @@ class SectionDialog(QDialog):
         super().__init__(parent)
         self.section = section
         self.setWindowTitle(section.title)
-        self.resize(560, 460)
 
-        root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(18, 18, 18, 18)
-        root_layout.setSpacing(12)
+        root_layout, content_layout, self.scroll_area = create_scrollable_dialog_layout(self)
 
         title_label = QLabel(section.title, self)
         title_label.setObjectName("dialogTitle")
@@ -42,13 +40,15 @@ class SectionDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
         buttons.rejected.connect(self.reject)
 
-        root_layout.addWidget(title_label)
-        root_layout.addWidget(summary_label)
-        root_layout.addWidget(note_label)
-        root_layout.addWidget(planned_fields_group)
-        root_layout.addWidget(source_commands_group)
-        root_layout.addStretch(1)
+        content_layout.addWidget(title_label)
+        content_layout.addWidget(summary_label)
+        content_layout.addWidget(note_label)
+        content_layout.addWidget(planned_fields_group)
+        content_layout.addWidget(source_commands_group)
+        content_layout.addStretch(1)
         root_layout.addWidget(buttons)
+
+        apply_initial_window_size(self, 560, 460)
 
     def _create_bullets(self, items: tuple[str, ...], parent: QWidget) -> QLabel:
         bullet_lines = "".join(f"<li>{item}</li>" for item in items)

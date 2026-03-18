@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
 from popup_controller.ui.remote_mapping_reference_dialog import RemoteMappingReferenceDialog
+from popup_controller.ui.window_helpers import apply_initial_window_size
 from popup_controller.services.settings_service import (
     SettingsSnapshot,
     parse_battery_voltage_response,
@@ -51,7 +52,6 @@ class SettingsDialog(QDialog):
         self._initial_load_scheduled = False
 
         self.setWindowTitle("Settings")
-        self.resize(920, 780)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(18, 18, 18, 18)
@@ -83,6 +83,7 @@ class SettingsDialog(QDialog):
         root_layout.addWidget(buttons)
 
         self._set_busy(True, "Loading controller settings...")
+        apply_initial_window_size(self, 920, 780)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)

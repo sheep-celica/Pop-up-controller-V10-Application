@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from popup_controller.services.error_service import ErrorEntry, ErrorReport, parse_stored_error_report
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
+from popup_controller.ui.window_helpers import apply_initial_window_size, create_scrollable_dialog_layout
 
 
 class ErrorsDialog(QDialog):
@@ -33,11 +34,8 @@ class ErrorsDialog(QDialog):
         self._initial_load_scheduled = False
 
         self.setWindowTitle("Errors")
-        self.resize(920, 560)
 
-        root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(18, 18, 18, 18)
-        root_layout.setSpacing(12)
+        root_layout, content_layout, self.scroll_area = create_scrollable_dialog_layout(self)
 
         title_label = QLabel("Errors", self)
         title_label.setObjectName("dialogTitle")
@@ -58,14 +56,16 @@ class ErrorsDialog(QDialog):
         self.module_group = self._build_error_group("Other module stored errors", "module")
         buttons = self._build_buttons()
 
-        root_layout.addWidget(title_label)
-        root_layout.addWidget(summary_label)
-        root_layout.addWidget(self.status_label)
-        root_layout.addWidget(self.loading_frame)
-        root_layout.addWidget(self.headlight_group)
-        root_layout.addWidget(self.module_group)
-        root_layout.addStretch(1)
+        content_layout.addWidget(title_label)
+        content_layout.addWidget(summary_label)
+        content_layout.addWidget(self.status_label)
+        content_layout.addWidget(self.loading_frame)
+        content_layout.addWidget(self.headlight_group)
+        content_layout.addWidget(self.module_group)
+        content_layout.addStretch(1)
         root_layout.addWidget(buttons)
+
+        apply_initial_window_size(self, 920, 560)
 
         self._set_busy(True, "Loading stored controller errors...")
 

@@ -5,18 +5,16 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
-    QFrame,
     QGridLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
+from popup_controller.ui.window_helpers import apply_initial_window_size, create_scrollable_dialog_layout
 
 
 class DirectControlsDialog(QDialog):
@@ -26,11 +24,8 @@ class DirectControlsDialog(QDialog):
         self._busy = False
 
         self.setWindowTitle("Direct Controls")
-        self.resize(680, 420)
 
-        root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(18, 18, 18, 18)
-        root_layout.setSpacing(12)
+        root_layout, content_layout, self.scroll_area = create_scrollable_dialog_layout(self)
 
         title_label = QLabel("Direct Controls", self)
         title_label.setObjectName("dialogTitle")
@@ -50,12 +45,14 @@ class DirectControlsDialog(QDialog):
         self.actions_group = self._build_actions_group()
         buttons = self._build_buttons()
 
-        root_layout.addWidget(title_label)
-        root_layout.addWidget(summary_label)
-        root_layout.addWidget(self.status_label)
-        root_layout.addWidget(self.actions_group)
-        root_layout.addStretch(1)
+        content_layout.addWidget(title_label)
+        content_layout.addWidget(summary_label)
+        content_layout.addWidget(self.status_label)
+        content_layout.addWidget(self.actions_group)
+        content_layout.addStretch(1)
         root_layout.addWidget(buttons)
+
+        apply_initial_window_size(self, 680, 420)
 
     def _build_actions_group(self) -> QGroupBox:
         group = QGroupBox("Actions", self)

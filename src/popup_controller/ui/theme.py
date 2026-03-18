@@ -224,6 +224,41 @@ def apply_dark_theme(app: QApplication) -> None:
             border: none;
             background: transparent;
         }
+        QScrollBar:vertical {
+            background-color: #0f141c;
+            width: 14px;
+            margin: 2px;
+            border-radius: 7px;
+        }
+        QScrollBar::handle:vertical {
+            background-color: #4c6684;
+            min-height: 32px;
+            border-radius: 7px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background-color: #6a8caf;
+        }
+        QScrollBar:horizontal {
+            background-color: #0f141c;
+            height: 14px;
+            margin: 2px;
+            border-radius: 7px;
+        }
+        QScrollBar::handle:horizontal {
+            background-color: #4c6684;
+            min-width: 32px;
+            border-radius: 7px;
+        }
+        QScrollBar::handle:horizontal:hover {
+            background-color: #6a8caf;
+        }
+        QScrollBar::add-line,
+        QScrollBar::sub-line,
+        QScrollBar::add-page,
+        QScrollBar::sub-page {
+            background: transparent;
+            border: none;
+        }
         QProgressBar {
             background-color: #0c121a;
             border: 1px solid #33516d;

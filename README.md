@@ -59,6 +59,7 @@ The current firmware bundle in [firmware/pop_up_controller_v10_firmware_v_1.0.5.
 Use the PowerShell helper script:
 
 ```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 scripts\build_exe.ps1
 ```
 

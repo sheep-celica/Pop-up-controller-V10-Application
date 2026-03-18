@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QStatusBar,
     QVBoxLayout,
     QWidget,
@@ -46,6 +47,9 @@ from popup_controller.ui.statistics_dialog import StatisticsDialog
 logger = logging.getLogger(__name__)
 
 FLASH_RECONNECT_DELAY_MS = 3000
+HEADER_INFO_CARD_LAYOUT_BREAKPOINT_WIDE = 1280
+HEADER_INFO_CARD_LAYOUT_BREAKPOINT_MEDIUM = 860
+SECTION_BUTTON_LAYOUT_BREAKPOINT = 900
 
 
 class MainWindow(QMainWindow):
@@ -68,6 +72,10 @@ class MainWindow(QMainWindow):
         )
         self._latest_firmware_release: FirmwareReleaseInfo | None = None
         self._startup_firmware_check_scheduled = False
+        self._header_info_card_columns = 0
+        self._section_button_columns = 0
+        self.header_info_cards: list[QFrame] = []
+        self.section_button_order: list[str] = []
         self.section_buttons: dict[str, QPushButton] = {}
         self._controller_operating_state: str | None = None
         self.setWindowTitle(settings.app_display_name)
@@ -87,6 +95,7 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
+        self._update_responsive_layouts()
         if self._startup_firmware_check_scheduled or not self.settings.auto_check_latest_firmware_on_startup:
             return
 
@@ -95,10 +104,21 @@ class MainWindow(QMainWindow):
         self.latest_firmware_status_label.setToolTip("")
         QTimer.singleShot(0, self._auto_refresh_latest_firmware)
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_responsive_layouts()
+
     def _auto_refresh_latest_firmware(self) -> None:
         self._fetch_latest_firmware_release(show_error_dialog=False)
+
     def _build_ui(self) -> None:
-        central_widget = QWidget(self)
+        self.central_scroll_area = QScrollArea(self)
+        self.central_scroll_area.setWidgetResizable(True)
+        self.central_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.central_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.central_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        central_widget = QWidget(self.central_scroll_area)
         root_layout = QVBoxLayout(central_widget)
         root_layout.setContentsMargins(18, 18, 18, 18)
         root_layout.setSpacing(14)
@@ -107,7 +127,9 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self._build_sections_group())
         root_layout.addWidget(self._build_firmware_group())
         root_layout.addWidget(self._build_feedback_group(), stretch=1)
-        self.setCentralWidget(central_widget)
+        self.central_scroll_area.setWidget(central_widget)
+        self.setCentralWidget(self.central_scroll_area)
+        self._update_responsive_layouts()
         self.setStatusBar(QStatusBar(self))
 
     def _build_header_card(self) -> QFrame:
@@ -122,7 +144,7 @@ class MainWindow(QMainWindow):
         self.hero_title_label.setObjectName("heroTitle")
 
         self.hero_subtitle_label = QLabel(
-            "Find a running controller for live diagnostics, or choose any visible serial port to flash a fresh ESP32.",
+            "Find a running controller for live diagnostics, or choose any visible serial port to flash new firmware.",
             card,
         )
         self.hero_subtitle_label.setObjectName("heroSubtitle")
@@ -134,20 +156,26 @@ class MainWindow(QMainWindow):
         )
         self.controller_details_label.setObjectName("controllerBadge")
         self.controller_details_label.setWordWrap(True)
+        self.controller_details_label.setMinimumWidth(0)
 
-        info_row = QHBoxLayout()
-        info_row.setSpacing(12)
-        info_row.addWidget(self._create_header_info_card("FW version", "--", "firmware_version"))
-        info_row.addWidget(self._create_header_info_card("Build date", "--", "build_date"))
-        info_row.addWidget(self._create_header_info_card("Controller state", "--", "controller_state"))
-        info_row.addWidget(self._create_header_info_card("External expander", "--", "external_expander"))
-        info_row.addWidget(self._create_header_info_card("Temperature", "--", "temperature"))
-        info_row.addStretch(1)
+        self.header_metrics_widget = QWidget(card)
+        self.header_metrics_layout = QGridLayout(self.header_metrics_widget)
+        self.header_metrics_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_metrics_layout.setHorizontalSpacing(12)
+        self.header_metrics_layout.setVerticalSpacing(12)
+
+        self.header_info_cards = [
+            self._create_header_info_card("FW version", "--", "firmware_version"),
+            self._create_header_info_card("Build date", "--", "build_date"),
+            self._create_header_info_card("Controller state", "--", "controller_state"),
+            self._create_header_info_card("External expander", "--", "external_expander"),
+            self._create_header_info_card("Temperature", "--", "temperature"),
+        ]
 
         layout.addWidget(self.hero_title_label)
         layout.addWidget(self.hero_subtitle_label)
         layout.addWidget(self.controller_details_label)
-        layout.addLayout(info_row)
+        layout.addWidget(self.header_metrics_widget)
         return card
 
     def _create_header_info_card(self, caption: str, value: str, key: str) -> QFrame:
@@ -164,6 +192,7 @@ class MainWindow(QMainWindow):
         value_label = QLabel(value, card)
         value_label.setObjectName("miniMetricValue")
         value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        value_label.setWordWrap(True)
 
         setattr(self, f"{key}_value", value_label)
 
@@ -199,17 +228,17 @@ class MainWindow(QMainWindow):
 
     def _build_sections_group(self) -> QGroupBox:
         self.sections_group = QGroupBox("Controller sections", self)
-        layout = QGridLayout(self.sections_group)
-        layout.setHorizontalSpacing(12)
-        layout.setVerticalSpacing(12)
+        self.sections_layout = QGridLayout(self.sections_group)
+        self.sections_layout.setHorizontalSpacing(12)
+        self.sections_layout.setVerticalSpacing(12)
 
-        for index, section in enumerate(SECTION_DEFINITIONS):
+        for section in SECTION_DEFINITIONS:
             button = QPushButton(f"{section.title}\n{section.button_subtitle}", self.sections_group)
             button.setProperty("sectionButton", True)
             button.setMinimumHeight(88)
             button.setToolTip(section.summary)
             self.section_buttons[section.section_id] = button
-            layout.addWidget(button, index // 2, index % 2)
+            self.section_button_order.append(section.section_id)
 
         return self.sections_group
 
@@ -243,6 +272,7 @@ class MainWindow(QMainWindow):
         self.latest_firmware_status_label = QLabel("Not checked yet.", latest_row)
         self.latest_firmware_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.latest_firmware_status_label.setWordWrap(True)
+        self.latest_firmware_status_label.setMinimumWidth(0)
         self.check_latest_firmware_button = QPushButton("Check latest", latest_row)
         self.download_latest_firmware_button = QPushButton("Download latest", latest_row)
 
@@ -274,6 +304,70 @@ class MainWindow(QMainWindow):
             self.section_buttons[section.section_id].clicked.connect(
                 lambda checked=False, current_section=section: self.open_section_dialog(current_section)
             )
+
+    def _update_responsive_layouts(self) -> None:
+        self._update_header_info_card_layout()
+        self._update_section_button_layout()
+
+    def _content_width_hint(self) -> int:
+        viewport_width = self.central_scroll_area.viewport().width()
+        if viewport_width > 0:
+            return viewport_width
+        return self.settings.default_window_width
+
+    def _header_info_card_column_count(self) -> int:
+        width = self._content_width_hint()
+        if width >= HEADER_INFO_CARD_LAYOUT_BREAKPOINT_WIDE:
+            return len(self.header_info_cards)
+        if width >= HEADER_INFO_CARD_LAYOUT_BREAKPOINT_MEDIUM:
+            return 3
+        return 2
+
+    def _update_header_info_card_layout(self) -> None:
+        column_count = self._header_info_card_column_count()
+        if column_count == self._header_info_card_columns:
+            return
+
+        self._header_info_card_columns = column_count
+        while self.header_metrics_layout.count():
+            self.header_metrics_layout.takeAt(0)
+
+        for column in range(len(self.header_info_cards)):
+            self.header_metrics_layout.setColumnStretch(column, 0)
+
+        for index, card in enumerate(self.header_info_cards):
+            row = index // column_count
+            column = index % column_count
+            self.header_metrics_layout.addWidget(card, row, column)
+
+        for column in range(column_count):
+            self.header_metrics_layout.setColumnStretch(column, 1)
+
+    def _section_button_column_count(self) -> int:
+        width = self._content_width_hint()
+        if width >= SECTION_BUTTON_LAYOUT_BREAKPOINT:
+            return 2
+        return 1
+
+    def _update_section_button_layout(self) -> None:
+        column_count = self._section_button_column_count()
+        if column_count == self._section_button_columns:
+            return
+
+        self._section_button_columns = column_count
+        while self.sections_layout.count():
+            self.sections_layout.takeAt(0)
+
+        for column in range(2):
+            self.sections_layout.setColumnStretch(column, 0)
+
+        for index, section_id in enumerate(self.section_button_order):
+            row = index // column_count
+            column = index % column_count
+            self.sections_layout.addWidget(self.section_buttons[section_id], row, column)
+
+        for column in range(column_count):
+            self.sections_layout.setColumnStretch(column, 1)
 
     def find_controller(self) -> None:
         if self.serial_service.is_connected:

@@ -15,12 +15,12 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
 from popup_controller.ui.voltage_calibration_dialog import VoltageCalibrationDialog
+from popup_controller.ui.window_helpers import apply_initial_window_size, create_scrollable_dialog_layout
 
 
 SERVICE_ACCESS_PASSWORD = "SE-aeemc2"
@@ -33,11 +33,8 @@ class ServiceDialog(QDialog):
         self._busy = False
 
         self.setWindowTitle("Service")
-        self.resize(860, 680)
 
-        root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(18, 18, 18, 18)
-        root_layout.setSpacing(12)
+        root_layout, content_layout, self.scroll_area = create_scrollable_dialog_layout(self)
 
         title_label = QLabel("Service", self)
         title_label.setObjectName("dialogTitle")
@@ -59,15 +56,17 @@ class ServiceDialog(QDialog):
         self.manufacture_group = self._build_manufacture_group()
         buttons = self._build_buttons()
 
-        root_layout.addWidget(title_label)
-        root_layout.addWidget(summary_label)
-        root_layout.addWidget(self.status_label)
-        root_layout.addWidget(self.loading_frame)
-        root_layout.addWidget(self.statistics_group)
-        root_layout.addWidget(self.voltage_calibration_group)
-        root_layout.addWidget(self.manufacture_group)
-        root_layout.addStretch(1)
+        content_layout.addWidget(title_label)
+        content_layout.addWidget(summary_label)
+        content_layout.addWidget(self.status_label)
+        content_layout.addWidget(self.loading_frame)
+        content_layout.addWidget(self.statistics_group)
+        content_layout.addWidget(self.voltage_calibration_group)
+        content_layout.addWidget(self.manufacture_group)
+        content_layout.addStretch(1)
         root_layout.addWidget(buttons)
+
+        apply_initial_window_size(self, 860, 680)
 
         self._set_busy(False)
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QScrollArea
 
 from popup_controller.config import AppSettings
 from popup_controller.services.firmware_service import FlashResult
@@ -110,6 +110,42 @@ def test_main_window_shows_application_version(qtbot) -> None:
 
     assert window.windowTitle() == settings.app_display_name
     assert settings.app_version in window.hero_title_label.text()
+
+
+def test_main_window_uses_scroll_area_for_overflow_content(qtbot) -> None:
+    settings = AppSettings(auto_check_latest_firmware_on_startup=False)
+    window = MainWindow(
+        settings=settings,
+        serial_service=FakeSerialService(connected=False),
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    window.resize(settings.default_window_width, settings.default_window_height)
+    window.show()
+    qtbot.wait(50)
+
+    assert isinstance(window.centralWidget(), QScrollArea)
+    assert window.central_scroll_area.verticalScrollBar().maximum() > 0
+
+
+def test_main_window_reflows_header_cards_on_narrow_width(qtbot) -> None:
+    settings = AppSettings(auto_check_latest_firmware_on_startup=False)
+    window = MainWindow(
+        settings=settings,
+        serial_service=FakeSerialService(connected=False),
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    window.resize(780, settings.default_window_height)
+    window.show()
+    qtbot.wait(50)
+
+    positions = [window.header_metrics_layout.getItemPosition(index)[:2] for index in range(window.header_metrics_layout.count())]
+
+    assert max(column for _, column in positions) == 1
+    assert max(row for row, _ in positions) >= 2
 
 
 def test_flash_success_schedules_delayed_reconnect(qtbot, monkeypatch) -> None:

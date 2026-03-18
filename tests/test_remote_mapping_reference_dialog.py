@@ -1,11 +1,13 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from PySide6.QtGui import QImage
+from PySide6.QtWidgets import QScrollArea
 
 from popup_controller.ui.remote_mapping_reference_dialog import RemoteMappingReferenceDialog
 
 
-def test_remote_mapping_reference_dialog_scales_image_and_fixes_window_size(qtbot, tmp_path) -> None:
+
+def test_remote_mapping_reference_dialog_scales_image_and_uses_scroll_area(qtbot, tmp_path) -> None:
     image_path = tmp_path / "remote_mapping.png"
     image = QImage(200, 100, QImage.Format.Format_ARGB32)
     image.fill(0xFF336699)
@@ -18,5 +20,6 @@ def test_remote_mapping_reference_dialog_scales_image_and_fixes_window_size(qtbo
     assert pixmap is not None
     assert pixmap.width() == 100
     assert pixmap.height() == 50
-    assert dialog.minimumWidth() == dialog.maximumWidth()
-    assert dialog.minimumHeight() == dialog.maximumHeight()
+    assert isinstance(dialog.scroll_area, QScrollArea)
+    assert dialog.minimumWidth() != dialog.maximumWidth()
+    assert dialog.minimumHeight() != dialog.maximumHeight()
