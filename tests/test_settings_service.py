@@ -55,6 +55,10 @@ CURRENT_SENSING_DELAY_RESPONSE = """[51018] POP_UP_SENSING_DELAY_US=1000
 """
 
 
+CURRENT_REMOTE_INPUTS_WITH_HEADLIGHTS_RESPONSE = """[283268] ALLOW_REMOTE_INPUTS_WITH_HEADLIGHTS=FALSE
+"""
+
+
 LEGACY_SENSING_DELAY_RESPONSE = """[51018] Pop-up sensing delay: 300 us
 """
 
@@ -82,6 +86,8 @@ def test_parse_settings_snapshot_extracts_expected_values() -> None:
     assert "unavailable" in snapshot.min_state_persist_status.lower()
     assert snapshot.sensing_delay_us is None
     assert "unavailable" in snapshot.sensing_delay_status.lower()
+    assert snapshot.allow_remote_inputs_with_headlights is None
+    assert "unavailable" in snapshot.remote_inputs_with_headlights_status.lower()
     assert snapshot.remote_input_mapping is None
     assert snapshot.rh_timing.display_text.startswith("Supported range")
     assert "Populated buckets: 8/41" in snapshot.lh_timing.display_text
@@ -95,6 +101,8 @@ def test_parse_settings_snapshot_tolerates_optional_future_fields() -> None:
     assert snapshot.idle_power_off_seconds is None
     assert snapshot.min_state_persist_ms == 250
     assert snapshot.min_state_persist_status == ""
+    assert snapshot.allow_remote_inputs_with_headlights is None
+    assert "unavailable" in snapshot.remote_inputs_with_headlights_status.lower()
     assert snapshot.remote_input_mapping == (1, 2, 3, 4)
     assert snapshot.remote_input_mapping_status == ""
     assert snapshot.rh_timing.display_text == "No calibration data reported by controller."
@@ -107,6 +115,7 @@ def test_parse_settings_snapshot_supports_current_firmware_formats() -> None:
         CURRENT_REMOTE_MAPPING_RESPONSE,
         CURRENT_IDLE_POWER_RESPONSE,
         CURRENT_SENSING_DELAY_RESPONSE,
+        CURRENT_REMOTE_INPUTS_WITH_HEADLIGHTS_RESPONSE,
     )
 
     assert snapshot.idle_power_off_seconds == 86400
@@ -114,6 +123,8 @@ def test_parse_settings_snapshot_supports_current_firmware_formats() -> None:
     assert snapshot.min_state_persist_status == ""
     assert snapshot.sensing_delay_us == 1000
     assert snapshot.sensing_delay_status == ""
+    assert snapshot.allow_remote_inputs_with_headlights is False
+    assert snapshot.remote_inputs_with_headlights_status == ""
     assert snapshot.remote_input_mapping == (4, 3, 2, 1)
     assert snapshot.remote_input_mapping_status == ""
 
@@ -125,6 +136,7 @@ def test_parse_settings_snapshot_supports_legacy_sensing_delay_format() -> None:
         CURRENT_REMOTE_MAPPING_RESPONSE,
         CURRENT_IDLE_POWER_RESPONSE,
         LEGACY_SENSING_DELAY_RESPONSE,
+        CURRENT_REMOTE_INPUTS_WITH_HEADLIGHTS_RESPONSE,
     )
 
     assert snapshot.sensing_delay_us == 300

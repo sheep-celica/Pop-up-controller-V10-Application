@@ -36,6 +36,8 @@ from popup_controller.services.settings_service import (
 
 
 REMOTE_INPUT_LABELS = ("RH Wink", "LH Wink", "Both Wink", "Toggle Sleepy Eye Mode")
+FULL_SETTINGS_IDLE_TIMEOUT_SECONDS = 0.20
+SINGLE_VALUE_IDLE_TIMEOUT_SECONDS = 0.15
 
 
 class SettingsDialog(QDialog):
@@ -122,6 +124,7 @@ class SettingsDialog(QDialog):
 
         self.battery_group = self._build_battery_group()
         self.sleepy_eye_group = self._build_sleepy_eye_group()
+        self.remote_inputs_with_light_switch_group = self._build_remote_inputs_with_light_switch_group()
         self.idle_power_group = self._build_idle_power_group()
         self.min_state_group = self._build_min_state_group()
         self.sensing_delay_group = self._build_sensing_delay_group()
@@ -130,6 +133,7 @@ class SettingsDialog(QDialog):
 
         content_layout.addWidget(self.battery_group)
         content_layout.addWidget(self.sleepy_eye_group)
+        content_layout.addWidget(self.remote_inputs_with_light_switch_group)
         content_layout.addWidget(self.idle_power_group)
         content_layout.addWidget(self.min_state_group)
         content_layout.addWidget(self.sensing_delay_group)
@@ -233,6 +237,48 @@ class SettingsDialog(QDialog):
         editor_layout.addWidget(self.sleepy_eye_update_button, 1, 3)
 
         self.sleepy_eye_update_button.clicked.connect(self.update_sleepy_eye_setting)
+        layout.addWidget(editor)
+        return group
+
+    def _build_remote_inputs_with_light_switch_group(self) -> QGroupBox:
+        group = QGroupBox("Remote inputs with light-switch", self.content_widget)
+        layout = QVBoxLayout(group)
+        layout.setSpacing(10)
+
+        layout.addWidget(self._create_section_heading("Current settings", group))
+        current_row = QHBoxLayout()
+        current_row.setSpacing(12)
+        current_row.addWidget(self._create_metric_card("Current value", "remote_inputs_with_headlights", "controller flag"))
+        current_row.addStretch(1)
+        layout.addLayout(current_row)
+
+        layout.addWidget(self._create_section_heading("New settings", group))
+        editor = self._create_editor_card(group)
+        editor_layout = QGridLayout(editor)
+        editor_layout.setHorizontalSpacing(12)
+        editor_layout.setVerticalSpacing(10)
+        editor_layout.addWidget(
+            self._create_section_note(
+                "Choose whether the controller should accept remote inputs while the light-switch is being used.",
+                editor,
+            ),
+            0,
+            0,
+            1,
+            4,
+        )
+
+        self.remote_inputs_with_headlights_combo = QComboBox(editor)
+        self.remote_inputs_with_headlights_combo.addItems(["TRUE", "FALSE"])
+        self.remote_inputs_with_headlights_update_button = QPushButton("Update setting", editor)
+
+        editor_layout.addWidget(QLabel("New value", editor), 1, 0)
+        editor_layout.addWidget(self.remote_inputs_with_headlights_combo, 1, 1)
+        editor_layout.addWidget(self.remote_inputs_with_headlights_update_button, 1, 3)
+
+        self.remote_inputs_with_headlights_update_button.clicked.connect(
+            self.update_remote_inputs_with_headlights_setting
+        )
         layout.addWidget(editor)
         return group
 
@@ -517,7 +563,7 @@ class SettingsDialog(QDialog):
         try:
             full_response = self.serial_service.request_text(
                 "printEverything",
-                idle_timeout_seconds=0.45,
+                idle_timeout_seconds=FULL_SETTINGS_IDLE_TIMEOUT_SECONDS,
                 max_duration_seconds=4.0,
                 progress_callback=self._process_loading_events,
             )
@@ -526,25 +572,31 @@ class SettingsDialog(QDialog):
 
             idle_power_response = self.serial_service.request_text(
                 "getIdleTimeToPowerOff",
-                idle_timeout_seconds=0.35,
+                idle_timeout_seconds=SINGLE_VALUE_IDLE_TIMEOUT_SECONDS,
                 max_duration_seconds=2.0,
                 progress_callback=self._process_loading_events,
             )
             min_state_response = self.serial_service.request_text(
                 "printPopUpMinStatePersistMs",
-                idle_timeout_seconds=0.35,
+                idle_timeout_seconds=SINGLE_VALUE_IDLE_TIMEOUT_SECONDS,
                 max_duration_seconds=2.0,
                 progress_callback=self._process_loading_events,
             )
             remote_input_response = self.serial_service.request_text(
                 "printRemoteInputPins",
-                idle_timeout_seconds=0.35,
+                idle_timeout_seconds=SINGLE_VALUE_IDLE_TIMEOUT_SECONDS,
                 max_duration_seconds=2.0,
                 progress_callback=self._process_loading_events,
             )
             sensing_delay_response = self.serial_service.request_text(
                 "printPopUpSensingDelayUs",
-                idle_timeout_seconds=0.35,
+                idle_timeout_seconds=SINGLE_VALUE_IDLE_TIMEOUT_SECONDS,
+                max_duration_seconds=2.0,
+                progress_callback=self._process_loading_events,
+            )
+            remote_inputs_with_headlights_response = self.serial_service.request_text(
+                "printRemoteInputsWithHeadlights",
+                idle_timeout_seconds=SINGLE_VALUE_IDLE_TIMEOUT_SECONDS,
                 max_duration_seconds=2.0,
                 progress_callback=self._process_loading_events,
             )
@@ -554,6 +606,7 @@ class SettingsDialog(QDialog):
                 remote_input_response,
                 idle_power_response,
                 sensing_delay_response=sensing_delay_response,
+                remote_inputs_with_headlights_response=remote_inputs_with_headlights_response,
             )
             self._apply_snapshot(snapshot)
             self.status_label.setText(self._build_status_message(snapshot))
@@ -580,6 +633,17 @@ class SettingsDialog(QDialog):
         )
         if snapshot.allow_sleepy_eye_with_headlights is not None:
             self.sleepy_eye_combo.setCurrentText("TRUE" if snapshot.allow_sleepy_eye_with_headlights else "FALSE")
+
+        remote_inputs_with_headlights_suffix = snapshot.remote_inputs_with_headlights_status or "controller flag"
+        self._set_metric_card(
+            "remote_inputs_with_headlights",
+            self._format_bool(snapshot.allow_remote_inputs_with_headlights),
+            remote_inputs_with_headlights_suffix,
+        )
+        if snapshot.allow_remote_inputs_with_headlights is not None:
+            self.remote_inputs_with_headlights_combo.setCurrentText(
+                "TRUE" if snapshot.allow_remote_inputs_with_headlights else "FALSE"
+            )
 
         self._set_metric_card(
             "idle_seconds",
@@ -626,6 +690,8 @@ class SettingsDialog(QDialog):
     def _build_status_message(self, snapshot: SettingsSnapshot) -> str:
         message = f"Settings refreshed from {self.serial_service.port_name}."
         warnings: list[str] = []
+        if snapshot.allow_remote_inputs_with_headlights is None and snapshot.remote_inputs_with_headlights_status:
+            warnings.append(snapshot.remote_inputs_with_headlights_status)
         if snapshot.min_state_persist_ms is None and snapshot.min_state_persist_status:
             warnings.append(snapshot.min_state_persist_status)
         if snapshot.sensing_delay_us is None and snapshot.sensing_delay_status:
@@ -701,6 +767,14 @@ class SettingsDialog(QDialog):
             f"writeSleepyEyeModeWithHeadlights {value}",
             "Updating sleepy-eye setting...",
             "Sleepy-eye setting update failed",
+        )
+
+    def update_remote_inputs_with_headlights_setting(self) -> None:
+        value = self.remote_inputs_with_headlights_combo.currentText().strip().lower()
+        self._submit_update_command(
+            f"writeRemoteInputsWithHeadlights {value}",
+            "Updating remote inputs with light-switch setting...",
+            "Remote inputs with light-switch update failed",
         )
 
     def update_idle_timeout(self) -> None:

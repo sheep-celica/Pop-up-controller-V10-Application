@@ -61,6 +61,7 @@ SECTION_DEFINITIONS: tuple[SectionDefinition, ...] = (
         planned_fields=(
             "Battery voltage calibration constants and live voltage readback",
             "Sleepy-eye mode with headlights flag",
+            "Remote inputs with light-switch flag",
             "Idle power-off threshold in seconds and days",
             "Minimum state-persistence milliseconds",
             "Remote input mapping",
@@ -72,6 +73,8 @@ SECTION_DEFINITIONS: tuple[SectionDefinition, ...] = (
             "readBatteryVoltage",
             "getIdleTimeToPowerOff",
             "printSleepyEyeModeWithHeadlights",
+            "printRemoteInputsWithHeadlights",
+            "writeRemoteInputsWithHeadlights",
             "printPopUpMinStatePersistMs",
             "printRemoteInputPins",
             "setRemoteInputPins",

@@ -21,6 +21,10 @@ SETTINGS_RESPONSE = """[2185281] Battery voltage calibration constants: a=1.0015
 """
 
 
+REMOTE_INPUTS_WITH_HEADLIGHTS_RESPONSE = """[283268] ALLOW_REMOTE_INPUTS_WITH_HEADLIGHTS=FALSE
+"""
+
+
 class FakeSerialService:
     def __init__(self, connected: bool = True, request_responses: dict[str, str] | None = None) -> None:
         self._connected = connected
@@ -155,6 +159,7 @@ def test_settings_dialog_loads_sensing_delay_setting(qtbot) -> None:
             "printPopUpMinStatePersistMs": "[273808] MIN_STATE_PERSIST_MS=5\n",
             "printRemoteInputPins": "[274258] REMOTE_INPUT_PINS=4 3 2 1\n",
             "printPopUpSensingDelayUs": "[51018] POP_UP_SENSING_DELAY_US=1000\n",
+            "printRemoteInputsWithHeadlights": REMOTE_INPUTS_WITH_HEADLIGHTS_RESPONSE,
         }
     )
     dialog = SettingsDialog(serial_service=serial_service)
@@ -163,8 +168,11 @@ def test_settings_dialog_loads_sensing_delay_setting(qtbot) -> None:
     dialog.load_settings()
 
     assert "printPopUpSensingDelayUs" in serial_service.request_calls
+    assert "printRemoteInputsWithHeadlights" in serial_service.request_calls
     assert dialog.sensing_delay_value.text() == "1,000 us"
     assert dialog.sensing_delay_spin.value() == 1000
+    assert dialog.remote_inputs_with_headlights_value.text() == "FALSE"
+    assert dialog.remote_inputs_with_headlights_combo.currentText() == "FALSE"
 
 
 def test_settings_dialog_updates_sensing_delay_with_expected_command(qtbot, monkeypatch) -> None:
@@ -188,4 +196,28 @@ def test_settings_dialog_updates_sensing_delay_with_expected_command(qtbot, monk
         "command": "writePopUpSensingDelayUs 1234",
         "busy_message": "Updating pop-up sensing delay...",
         "error_title": "Pop-up sensing delay update failed",
+    }
+
+
+def test_settings_dialog_updates_remote_inputs_with_light_switch_with_expected_command(qtbot, monkeypatch) -> None:
+    dialog = SettingsDialog(serial_service=FakeSerialService())
+    qtbot.addWidget(dialog)
+
+    captured: dict[str, str] = {}
+
+    def fake_submit(command: str, busy_message: str, error_title: str) -> bool:
+        captured["command"] = command
+        captured["busy_message"] = busy_message
+        captured["error_title"] = error_title
+        return True
+
+    monkeypatch.setattr(dialog, "_submit_update_command", fake_submit)
+    dialog.remote_inputs_with_headlights_combo.setCurrentText("TRUE")
+
+    dialog.update_remote_inputs_with_headlights_setting()
+
+    assert captured == {
+        "command": "writeRemoteInputsWithHeadlights true",
+        "busy_message": "Updating remote inputs with light-switch setting...",
+        "error_title": "Remote inputs with light-switch update failed",
     }

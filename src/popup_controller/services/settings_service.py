@@ -10,6 +10,10 @@ _BATTERY_CALIBRATION_RE = re.compile(
     re.IGNORECASE,
 )
 _SLEEPY_EYE_RE = re.compile(r"ALLOW_SLEEPY_EYE_MODE_WITH_HEADLIGHTS=(?P<value>TRUE|FALSE)", re.IGNORECASE)
+_REMOTE_INPUTS_WITH_HEADLIGHTS_RE = re.compile(
+    r"ALLOW_REMOTE_INPUTS_WITH_HEADLIGHTS=(?P<value>TRUE|FALSE)",
+    re.IGNORECASE,
+)
 _IDLE_POWER_OFF_RE = re.compile(r"Idle power-off threshold:\s*(?P<seconds>\d+)\s*s\.?", re.IGNORECASE)
 _TEMPERATURE_RE = re.compile(r"Temperature:\s*(?P<value>[-+]?\d+(?:\.\d+)?)\s*C", re.IGNORECASE)
 _BATTERY_VOLTAGE_RE = re.compile(
@@ -51,6 +55,8 @@ class SettingsSnapshot:
     battery_voltage_v: float | None
     temperature_c: float | None
     allow_sleepy_eye_with_headlights: bool | None
+    allow_remote_inputs_with_headlights: bool | None
+    remote_inputs_with_headlights_status: str
     idle_power_off_seconds: int | None
     min_state_persist_ms: int | None
     min_state_persist_status: str
@@ -75,11 +81,17 @@ def parse_settings_snapshot(
     remote_input_response: str | None = None,
     idle_power_response: str | None = None,
     sensing_delay_response: str | None = None,
+    remote_inputs_with_headlights_response: str | None = None,
 ) -> SettingsSnapshot:
     lines = tuple(_normalize_lines(raw_response))
 
     battery_calibration_a, battery_calibration_b = _parse_battery_calibration(lines)
     allow_sleepy_eye_with_headlights = _parse_sleepy_eye_setting(lines)
+    allow_remote_inputs_with_headlights, remote_inputs_with_headlights_status = _parse_bool_response(
+        lines,
+        _REMOTE_INPUTS_WITH_HEADLIGHTS_RE,
+        remote_inputs_with_headlights_response,
+    )
     idle_power_off_seconds = _parse_idle_power_off_seconds(lines, idle_power_response)
     temperature_c = _parse_float_value(lines, _TEMPERATURE_RE)
     battery_voltage_v = _parse_last_float_value(lines, _BATTERY_VOLTAGE_RE)
@@ -101,6 +113,8 @@ def parse_settings_snapshot(
         battery_voltage_v=battery_voltage_v,
         temperature_c=temperature_c,
         allow_sleepy_eye_with_headlights=allow_sleepy_eye_with_headlights,
+        allow_remote_inputs_with_headlights=allow_remote_inputs_with_headlights,
+        remote_inputs_with_headlights_status=remote_inputs_with_headlights_status,
         idle_power_off_seconds=idle_power_off_seconds,
         min_state_persist_ms=min_state_persist_ms,
         min_state_persist_status=min_state_persist_status,
@@ -140,6 +154,41 @@ def _parse_battery_calibration(lines: tuple[str, ...]) -> tuple[float | None, fl
 def _parse_sleepy_eye_setting(lines: tuple[str, ...]) -> bool | None:
     for line in lines:
         match = _SLEEPY_EYE_RE.search(line)
+        if match is None:
+            continue
+        return match.group("value").upper() == "TRUE"
+    return None
+
+
+def _parse_bool_response(
+    lines: tuple[str, ...],
+    pattern: re.Pattern[str],
+    raw_response: str | None = None,
+) -> tuple[bool | None, str]:
+    parsed_value = _extract_bool_value(lines, pattern)
+    if parsed_value is not None:
+        return parsed_value, ""
+
+    if raw_response is None or not raw_response.strip():
+        return None, "Current value unavailable on this firmware."
+
+    response_lines = tuple(_normalize_lines(raw_response))
+    normalized_text = " ".join(response_lines).casefold()
+    if "unknown command" in normalized_text:
+        return None, "Current value unavailable on this firmware."
+    if "placeholder" in normalized_text:
+        return None, "Controller reports this command as a placeholder."
+
+    parsed_value = _extract_bool_value(response_lines, pattern)
+    if parsed_value is not None:
+        return parsed_value, ""
+
+    return None, "Controller returned an unexpected format for this value."
+
+
+def _extract_bool_value(lines: tuple[str, ...], pattern: re.Pattern[str]) -> bool | None:
+    for line in lines:
+        match = pattern.search(line)
         if match is None:
             continue
         return match.group("value").upper() == "TRUE"
