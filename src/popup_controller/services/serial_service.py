@@ -64,16 +64,22 @@ class SerialService:
         expected_response_fragment: str = "Available commands:",
         warmup_seconds: float = 1.5,
         probe_window_seconds: float = 1.2,
+        progress_callback: Callable[[], None] | None = None,
+        port_status_callback: Callable[[SerialPortInfo, int, int], None] | None = None,
     ) -> ControllerDetectionResult | None:
         if self.is_connected:
             raise SerialConnectionError("Disconnect before searching for the controller.")
 
-        for port_info in self.available_ports():
+        ports = self.available_ports()
+        for index, port_info in enumerate(ports, start=1):
+            if port_status_callback is not None:
+                port_status_callback(port_info, index, len(ports))
             response = self._probe_port(
                 port=port_info.device,
                 probe_command=probe_command,
                 warmup_seconds=warmup_seconds,
                 probe_window_seconds=probe_window_seconds,
+                progress_callback=progress_callback,
             )
             if expected_response_fragment in response:
                 return ControllerDetectionResult(port=port_info, response=response)
@@ -181,6 +187,7 @@ class SerialService:
         probe_command: str,
         warmup_seconds: float,
         probe_window_seconds: float,
+        progress_callback: Callable[[], None] | None = None,
     ) -> str:
         try:
             connection = self._open_port(port)
@@ -188,20 +195,25 @@ class SerialService:
             return ""
 
         try:
-            time.sleep(max(0.0, warmup_seconds))
+            self._wait_with_progress(warmup_seconds, progress_callback)
             connection.reset_input_buffer()
 
             payload = probe_command.rstrip("\r\n").encode("utf-8") + self.command_terminator
             connection.write(payload)
             connection.flush()
-            return self._read_text(connection, probe_window_seconds)
+            return self._read_text(connection, probe_window_seconds, progress_callback=progress_callback)
         except SerialException:
             return ""
         finally:
             if connection.is_open:
                 connection.close()
 
-    def _read_text(self, connection: serial.Serial, duration_seconds: float) -> str:
+    def _read_text(
+        self,
+        connection: serial.Serial,
+        duration_seconds: float,
+        progress_callback: Callable[[], None] | None = None,
+    ) -> str:
         deadline = time.monotonic() + max(0.0, duration_seconds)
         chunks: list[str] = []
 
@@ -211,8 +223,12 @@ class SerialService:
                 raw = connection.read(waiting)
                 if raw:
                     chunks.append(raw.decode("utf-8", errors="replace"))
+                if progress_callback is not None:
+                    progress_callback()
                 continue
 
+            if progress_callback is not None:
+                progress_callback()
             time.sleep(min(self.timeout_seconds, 0.05))
 
         return self._normalize_text("".join(chunks))
@@ -250,3 +266,14 @@ class SerialService:
 
     def _normalize_text(self, value: str) -> str:
         return value.replace("\r\n", "\n").replace("\r", "\n")
+
+    def _wait_with_progress(
+        self,
+        duration_seconds: float,
+        progress_callback: Callable[[], None] | None = None,
+    ) -> None:
+        deadline = time.monotonic() + max(0.0, duration_seconds)
+        while time.monotonic() < deadline:
+            if progress_callback is not None:
+                progress_callback()
+            time.sleep(min(self.timeout_seconds, 0.05))

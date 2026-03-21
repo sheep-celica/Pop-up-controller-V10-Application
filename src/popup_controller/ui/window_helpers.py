@@ -93,6 +93,24 @@ def create_scrollable_dialog_layout(
 
 
 
+
+def create_fixed_loading_slot(parent: QWidget, loading_frame: QFrame) -> QWidget:
+    slot = QWidget(parent)
+    slot_layout = QVBoxLayout(slot)
+    slot_layout.setContentsMargins(0, 0, 0, 0)
+    slot_layout.setSpacing(0)
+    slot_layout.addWidget(loading_frame)
+
+    slot_margins = slot_layout.contentsMargins()
+    slot.setFixedHeight(
+        loading_frame.sizeHint().height()
+        + slot_margins.top()
+        + slot_margins.bottom()
+    )
+    return slot
+
+
+
 def _screen_for_widget(widget: QWidget) -> QScreen | None:
     parent = widget.parentWidget()
     if parent is not None and parent.window().screen() is not None:
@@ -106,3 +124,4 @@ def _screen_for_widget(widget: QWidget) -> QScreen | None:
         return handle.screen()
 
     return QGuiApplication.primaryScreen()
+

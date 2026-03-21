@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from PySide6.QtCore import QEventLoop, Qt
 from PySide6.QtGui import QDoubleValidator
@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
 from popup_controller.services.settings_service import parse_battery_voltage_response
-from popup_controller.ui.window_helpers import apply_initial_window_size, create_scrollable_dialog_layout
+from popup_controller.ui.window_helpers import apply_initial_window_size, create_fixed_loading_slot, create_scrollable_dialog_layout
 from popup_controller.services.voltage_calibration_service import (
     VoltageCalibrationError,
     VoltageCalibrationResult,
@@ -63,15 +63,16 @@ class AddVoltageMeasurementDialog(QDialog):
         self.status_label.setWordWrap(True)
 
         self.loading_frame = self._build_loading_frame()
+        self.loading_slot = create_fixed_loading_slot(self, self.loading_frame)
         editor = self._build_editor_card()
         buttons = self._build_buttons()
 
         content_layout.addWidget(title_label)
         content_layout.addWidget(summary_label)
         content_layout.addWidget(self.status_label)
-        content_layout.addWidget(self.loading_frame)
         content_layout.addWidget(editor)
         content_layout.addStretch(1)
+        root_layout.addWidget(self.loading_slot)
         root_layout.addWidget(buttons)
 
         self._set_busy(False)
@@ -230,6 +231,7 @@ class VoltageCalibrationDialog(QDialog):
         self.status_label.setWordWrap(True)
 
         self.loading_frame = self._build_loading_frame()
+        self.loading_slot = create_fixed_loading_slot(self, self.loading_frame)
         self.measurements_group = self._build_measurements_group()
         self.results_group = self._build_results_group()
         buttons = self._build_buttons()
@@ -237,10 +239,10 @@ class VoltageCalibrationDialog(QDialog):
         content_layout.addWidget(title_label)
         content_layout.addWidget(summary_label)
         content_layout.addWidget(self.status_label)
-        content_layout.addWidget(self.loading_frame)
         content_layout.addWidget(self.measurements_group)
         content_layout.addWidget(self.results_group)
         content_layout.addStretch(1)
+        root_layout.addWidget(self.loading_slot)
         root_layout.addWidget(buttons)
 
         self._set_busy(False)
@@ -525,3 +527,4 @@ def _normalize_response(response: str) -> str:
 def _response_has_error(normalized_response: str) -> bool:
     lowered = normalized_response.casefold()
     return any(marker in lowered for marker in _ERROR_MARKERS)
+

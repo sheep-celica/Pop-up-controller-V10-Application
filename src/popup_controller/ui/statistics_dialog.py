@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from PySide6.QtCore import QEventLoop, Qt, QTimer
 from PySide6.QtGui import QShowEvent
@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
 from popup_controller.services.statistics_service import StatisticsParseError, StatisticsSnapshot, parse_statistics_snapshot
-from popup_controller.ui.window_helpers import apply_initial_window_size, create_scrollable_dialog_layout
+from popup_controller.ui.window_helpers import apply_initial_window_size, create_fixed_loading_slot, create_scrollable_dialog_layout
 
 
 class StatisticsDialog(QDialog):
@@ -48,6 +48,7 @@ class StatisticsDialog(QDialog):
         self.status_label.setWordWrap(True)
 
         self.loading_frame = self._build_loading_frame()
+        self.loading_slot = create_fixed_loading_slot(self, self.loading_frame)
         self.overview_group = self._build_overview_group()
         self.side_group = self._build_side_group()
         self.input_group = self._build_input_group()
@@ -56,11 +57,11 @@ class StatisticsDialog(QDialog):
         content_layout.addWidget(title_label)
         content_layout.addWidget(summary_label)
         content_layout.addWidget(self.status_label)
-        content_layout.addWidget(self.loading_frame)
         content_layout.addWidget(self.overview_group)
         content_layout.addWidget(self.side_group)
         content_layout.addWidget(self.input_group)
         content_layout.addStretch(1)
+        root_layout.addWidget(self.loading_slot)
         root_layout.addWidget(buttons)
 
         apply_initial_window_size(self, 760, 640)
@@ -262,3 +263,4 @@ class StatisticsDialog(QDialog):
 
     def _process_loading_events(self) -> None:
         QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+

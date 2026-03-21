@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
 from popup_controller.ui.voltage_calibration_dialog import VoltageCalibrationDialog
-from popup_controller.ui.window_helpers import apply_initial_window_size, create_scrollable_dialog_layout
+from popup_controller.ui.window_helpers import apply_initial_window_size, create_fixed_loading_slot, create_scrollable_dialog_layout
 
 
 SERVICE_ACCESS_PASSWORD = "SE-aeemc2"
@@ -51,6 +51,7 @@ class ServiceDialog(QDialog):
         self.status_label.setWordWrap(True)
 
         self.loading_frame = self._build_loading_frame()
+        self.loading_slot = create_fixed_loading_slot(self, self.loading_frame)
         self.statistics_group = self._build_statistics_group()
         self.voltage_calibration_group = self._build_voltage_calibration_group()
         self.manufacture_group = self._build_manufacture_group()
@@ -59,11 +60,11 @@ class ServiceDialog(QDialog):
         content_layout.addWidget(title_label)
         content_layout.addWidget(summary_label)
         content_layout.addWidget(self.status_label)
-        content_layout.addWidget(self.loading_frame)
         content_layout.addWidget(self.statistics_group)
         content_layout.addWidget(self.voltage_calibration_group)
         content_layout.addWidget(self.manufacture_group)
         content_layout.addStretch(1)
+        root_layout.addWidget(self.loading_slot)
         root_layout.addWidget(buttons)
 
         apply_initial_window_size(self, 860, 680)
@@ -317,3 +318,4 @@ class ServiceDialog(QDialog):
 
     def _process_events(self) -> None:
         QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+

@@ -25,7 +25,7 @@ from popup_controller.services.manufacture_service import (
     try_parse_manufacture_date,
 )
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
-from popup_controller.ui.window_helpers import apply_initial_window_size, create_scrollable_dialog_layout
+from popup_controller.ui.window_helpers import apply_initial_window_size, create_fixed_loading_slot, create_scrollable_dialog_layout
 
 
 class ManufactureDialog(QDialog):
@@ -54,6 +54,7 @@ class ManufactureDialog(QDialog):
         self.status_label.setWordWrap(True)
 
         self.loading_frame = self._build_loading_frame()
+        self.loading_slot = create_fixed_loading_slot(self, self.loading_frame)
         self.overview_group = self._build_overview_group()
         self.identity_group = self._build_identity_group()
         buttons = self._build_buttons()
@@ -61,10 +62,10 @@ class ManufactureDialog(QDialog):
         content_layout.addWidget(title_label)
         content_layout.addWidget(summary_label)
         content_layout.addWidget(self.status_label)
-        content_layout.addWidget(self.loading_frame)
         content_layout.addWidget(self.overview_group)
         content_layout.addWidget(self.identity_group)
         content_layout.addStretch(1)
+        root_layout.addWidget(self.loading_slot)
         root_layout.addWidget(buttons)
 
         apply_initial_window_size(self, 760, 540)
@@ -270,3 +271,4 @@ class ManufactureDialog(QDialog):
 
     def _process_loading_events(self) -> None:
         QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+

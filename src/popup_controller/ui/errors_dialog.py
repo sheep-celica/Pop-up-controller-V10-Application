@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from PySide6.QtCore import QEventLoop, Qt, QTimer
 from PySide6.QtGui import QShowEvent
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from popup_controller.services.error_service import ErrorEntry, ErrorReport, parse_stored_error_report
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
-from popup_controller.ui.window_helpers import apply_initial_window_size, create_scrollable_dialog_layout
+from popup_controller.ui.window_helpers import apply_initial_window_size, create_fixed_loading_slot, create_scrollable_dialog_layout
 
 
 class ErrorsDialog(QDialog):
@@ -52,6 +52,7 @@ class ErrorsDialog(QDialog):
         self.status_label.setWordWrap(True)
 
         self.loading_frame = self._build_loading_frame()
+        self.loading_slot = create_fixed_loading_slot(self, self.loading_frame)
         self.headlight_group = self._build_error_group("Headlight / pop-up stored errors", "headlight")
         self.module_group = self._build_error_group("Other module stored errors", "module")
         buttons = self._build_buttons()
@@ -59,10 +60,10 @@ class ErrorsDialog(QDialog):
         content_layout.addWidget(title_label)
         content_layout.addWidget(summary_label)
         content_layout.addWidget(self.status_label)
-        content_layout.addWidget(self.loading_frame)
         content_layout.addWidget(self.headlight_group)
         content_layout.addWidget(self.module_group)
         content_layout.addStretch(1)
+        root_layout.addWidget(self.loading_slot)
         root_layout.addWidget(buttons)
 
         apply_initial_window_size(self, 920, 560)
@@ -279,5 +280,4 @@ class ErrorsDialog(QDialog):
 
     def _process_loading_events(self) -> None:
         QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
-
 

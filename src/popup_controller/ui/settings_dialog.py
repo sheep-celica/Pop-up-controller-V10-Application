@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
 from popup_controller.ui.remote_mapping_reference_dialog import RemoteMappingReferenceDialog
-from popup_controller.ui.window_helpers import apply_initial_window_size
+from popup_controller.ui.window_helpers import apply_initial_window_size, create_fixed_loading_slot
 from popup_controller.services.settings_service import (
     SettingsSnapshot,
     parse_battery_voltage_response,
@@ -74,14 +74,15 @@ class SettingsDialog(QDialog):
         self.status_label.setWordWrap(True)
 
         self.loading_frame = self._build_loading_frame()
+        self.loading_slot = create_fixed_loading_slot(self, self.loading_frame)
         self.scroll_area = self._build_scroll_area()
         buttons = self._build_buttons()
 
         root_layout.addWidget(title_label)
         root_layout.addWidget(summary_label)
         root_layout.addWidget(self.status_label)
-        root_layout.addWidget(self.loading_frame)
         root_layout.addWidget(self.scroll_area, stretch=1)
+        root_layout.addWidget(self.loading_slot)
         root_layout.addWidget(buttons)
 
         self._set_busy(True, "Loading controller settings...")
@@ -922,3 +923,4 @@ class SettingsDialog(QDialog):
 
     def _process_loading_events(self) -> None:
         QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+

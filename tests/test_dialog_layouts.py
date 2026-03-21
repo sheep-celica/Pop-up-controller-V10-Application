@@ -94,3 +94,27 @@ def test_large_dialogs_scroll_when_resized_short(qtbot, tmp_path) -> None:
         dialog.show()
         qtbot.wait(50)
         assert dialog.scroll_area.verticalScrollBar().maximum() > 0, type(dialog).__name__
+
+def test_loader_dialogs_use_fixed_bottom_loading_slots(qtbot, tmp_path) -> None:
+    image_path = tmp_path / "remote_mapping.png"
+    image = QImage(200, 100, QImage.Format.Format_ARGB32)
+    image.fill(0xFF336699)
+    assert image.save(str(image_path)) is True
+
+    serial_service = FakeSerialService()
+    dialogs = [
+        ErrorsDialog(serial_service),
+        ManufactureDialog(serial_service),
+        ServiceDialog(serial_service),
+        SettingsDialog(serial_service, reference_image_path=image_path),
+        StatisticsDialog(serial_service),
+        AddVoltageMeasurementDialog(serial_service),
+        VoltageCalibrationDialog(serial_service),
+    ]
+
+    for dialog in dialogs:
+        qtbot.addWidget(dialog)
+        assert hasattr(dialog, "loading_slot"), type(dialog).__name__
+        assert dialog.loading_frame.parentWidget() is dialog.loading_slot, type(dialog).__name__
+        assert dialog.loading_slot.height() >= dialog.loading_frame.sizeHint().height(), type(dialog).__name__
+

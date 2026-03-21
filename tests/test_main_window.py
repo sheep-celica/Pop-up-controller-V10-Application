@@ -52,6 +52,9 @@ class FakeSerialService:
     def available_ports(self):
         return list(self._available_ports)
 
+    def find_controller_port(self, **kwargs):
+        return None
+
     def read_available(self):
         return []
 
@@ -125,7 +128,9 @@ def test_main_window_uses_scroll_area_for_overflow_content(qtbot) -> None:
     window.show()
     qtbot.wait(50)
 
-    assert isinstance(window.centralWidget(), QScrollArea)
+    assert window.centralWidget() is window.central_container
+    assert isinstance(window.central_scroll_area, QScrollArea)
+    assert window.loading_slot.height() >= window.main_loading_frame.sizeHint().height()
     assert window.central_scroll_area.verticalScrollBar().maximum() > 0
 
 
@@ -148,7 +153,7 @@ def test_main_window_reflows_header_cards_on_narrow_width(qtbot) -> None:
     assert max(row for row, _ in positions) >= 2
 
 
-def test_flash_success_schedules_delayed_reconnect(qtbot, monkeypatch) -> None:
+def test_flash_success_reconnects_immediately(qtbot, monkeypatch) -> None:
     serial_service = FakeSerialService()
     firmware_service = FakeFirmwareService()
     window = MainWindow(
@@ -164,38 +169,31 @@ def test_flash_success_schedules_delayed_reconnect(qtbot, monkeypatch) -> None:
     window.firmware_path_input.setText(str((Path.cwd() / "firmware" / "flash_bundle.zip").resolve()))
 
     monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
-    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: QMessageBox.StandardButton.Ok)
+    info_messages: list[str] = []
+
+    def fake_information(parent, title, text):
+        info_messages.append(text)
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "information", fake_information)
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.Ok)
 
-    monkeypatch.setattr(window, "_refresh_build_info", lambda: None)
-    monkeypatch.setattr(window, "_refresh_controller_state", lambda: None)
-    monkeypatch.setattr(window, "_refresh_external_expander", lambda: None)
-    monkeypatch.setattr(window, "_refresh_temperature", lambda: None)
-
-    scheduled: dict[str, object] = {}
-
-    def fake_single_shot(delay_ms: int, callback) -> None:
-        scheduled["delay_ms"] = delay_ms
-        scheduled["callback"] = callback
-
-    monkeypatch.setattr(QTimer, "singleShot", staticmethod(fake_single_shot))
+    monkeypatch.setattr(window, "_refresh_build_info", lambda **kwargs: None)
+    monkeypatch.setattr(window, "_refresh_controller_state", lambda **kwargs: None)
+    monkeypatch.setattr(window, "_refresh_external_expander", lambda **kwargs: None)
+    monkeypatch.setattr(window, "_refresh_temperature", lambda **kwargs: None)
 
     window.flash_firmware()
 
     assert serial_service.disconnect_calls == 1
     assert firmware_service.calls == [("COM11", Path(window.firmware_path_input.text()))]
-    assert scheduled["delay_ms"] == 3000
-
-    callback = scheduled["callback"]
-    assert callable(callback)
-    callback()
-
+    assert info_messages == ["Flashed test bundle to COM11."]
     assert serial_service.connect_calls == ["COM11"]
     assert serial_service.is_connected is True
     assert "Reconnected to COM11 after firmware flash" in window.controller_details_label.text()
 
 
-def test_flash_without_controller_connection_uses_selected_serial_port(qtbot, monkeypatch) -> None:
+def test_flash_without_controller_connection_reconnects_immediately(qtbot, monkeypatch) -> None:
     serial_service = FakeSerialService(
         port_name="COM7",
         connected=False,
@@ -216,32 +214,25 @@ def test_flash_without_controller_connection_uses_selected_serial_port(qtbot, mo
     window.firmware_path_input.setText(str((Path.cwd() / "firmware" / "flash_bundle.zip").resolve()))
 
     monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
-    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: QMessageBox.StandardButton.Ok)
+    info_messages: list[str] = []
+
+    def fake_information(parent, title, text):
+        info_messages.append(text)
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "information", fake_information)
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.Ok)
 
-    monkeypatch.setattr(window, "_refresh_build_info", lambda: None)
-    monkeypatch.setattr(window, "_refresh_controller_state", lambda: None)
-    monkeypatch.setattr(window, "_refresh_external_expander", lambda: None)
-    monkeypatch.setattr(window, "_refresh_temperature", lambda: None)
-
-    scheduled: dict[str, object] = {}
-
-    def fake_single_shot(delay_ms: int, callback) -> None:
-        scheduled["delay_ms"] = delay_ms
-        scheduled["callback"] = callback
-
-    monkeypatch.setattr(QTimer, "singleShot", staticmethod(fake_single_shot))
+    monkeypatch.setattr(window, "_refresh_build_info", lambda **kwargs: None)
+    monkeypatch.setattr(window, "_refresh_controller_state", lambda **kwargs: None)
+    monkeypatch.setattr(window, "_refresh_external_expander", lambda **kwargs: None)
+    monkeypatch.setattr(window, "_refresh_temperature", lambda **kwargs: None)
 
     window.flash_firmware()
 
     assert serial_service.disconnect_calls == 0
     assert firmware_service.calls == [("COM7", Path(window.firmware_path_input.text()))]
-    assert scheduled["delay_ms"] == 3000
-
-    callback = scheduled["callback"]
-    assert callable(callback)
-    callback()
-
+    assert info_messages == ["Flashed test bundle to COM7."]
     assert serial_service.connect_calls == ["COM7"]
     assert serial_service.is_connected is True
     assert "Reconnected to COM7 after firmware flash" in window.controller_details_label.text()
@@ -418,3 +409,4 @@ def test_main_window_auto_checks_latest_firmware_on_first_show(qtbot, monkeypatc
 
     window.showEvent(QShowEvent())
     assert release_service.fetch_calls == 1
+

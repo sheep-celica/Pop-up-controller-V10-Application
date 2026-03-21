@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
 from pathlib import Path
+import threading
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEventLoop, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QIcon, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QStatusBar,
@@ -46,7 +49,6 @@ from popup_controller.ui.statistics_dialog import StatisticsDialog
 
 logger = logging.getLogger(__name__)
 
-FLASH_RECONNECT_DELAY_MS = 3000
 HEADER_INFO_CARD_LAYOUT_BREAKPOINT_WIDE = 1280
 HEADER_INFO_CARD_LAYOUT_BREAKPOINT_MEDIUM = 860
 SECTION_BUTTON_LAYOUT_BREAKPOINT = 900
@@ -85,6 +87,9 @@ class MainWindow(QMainWindow):
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(settings.serial_poll_interval_ms)
         self._poll_timer.timeout.connect(self._poll_serial_feedback)
+        self._busy_operation_active = False
+        self._busy_status_text = ""
+        self._busy_cursor_active = False
 
         self._build_ui()
         self._connect_signals()
@@ -112,14 +117,19 @@ class MainWindow(QMainWindow):
         self._fetch_latest_firmware_release(show_error_dialog=False)
 
     def _build_ui(self) -> None:
-        self.central_scroll_area = QScrollArea(self)
+        self.central_container = QWidget(self)
+        container_layout = QVBoxLayout(self.central_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        self.central_scroll_area = QScrollArea(self.central_container)
         self.central_scroll_area.setWidgetResizable(True)
         self.central_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.central_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.central_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
-        central_widget = QWidget(self.central_scroll_area)
-        root_layout = QVBoxLayout(central_widget)
+        scroll_content = QWidget(self.central_scroll_area)
+        root_layout = QVBoxLayout(scroll_content)
         root_layout.setContentsMargins(18, 18, 18, 18)
         root_layout.setSpacing(14)
         root_layout.addWidget(self._build_header_card())
@@ -127,8 +137,25 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self._build_sections_group())
         root_layout.addWidget(self._build_firmware_group())
         root_layout.addWidget(self._build_feedback_group(), stretch=1)
-        self.central_scroll_area.setWidget(central_widget)
-        self.setCentralWidget(self.central_scroll_area)
+        self.central_scroll_area.setWidget(scroll_content)
+
+        self.loading_slot = QWidget(self.central_container)
+        loading_slot_layout = QVBoxLayout(self.loading_slot)
+        loading_slot_layout.setContentsMargins(18, 0, 18, 10)
+        loading_slot_layout.setSpacing(0)
+        self.main_loading_frame = self._build_loading_frame(self.loading_slot)
+        loading_slot_layout.addWidget(self.main_loading_frame)
+        loading_slot_margins = loading_slot_layout.contentsMargins()
+        self.loading_slot.setFixedHeight(
+            self.main_loading_frame.sizeHint().height()
+            + loading_slot_margins.top()
+            + loading_slot_margins.bottom()
+        )
+
+        container_layout.addWidget(self.central_scroll_area, stretch=1)
+        container_layout.addWidget(self.loading_slot)
+
+        self.setCentralWidget(self.central_container)
         self._update_responsive_layouts()
         self.setStatusBar(QStatusBar(self))
 
@@ -177,6 +204,27 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.controller_details_label)
         layout.addWidget(self.header_metrics_widget)
         return card
+
+    def _build_loading_frame(self, parent: QWidget) -> QFrame:
+        frame = QFrame(parent)
+        frame.setObjectName("loadingFrame")
+        frame.setVisible(False)
+
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(12)
+
+        self.loading_label = QLabel("Working...", frame)
+        self.loading_label.setObjectName("loadingLabel")
+
+        self.loading_bar = QProgressBar(frame)
+        self.loading_bar.setRange(0, 0)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setMinimumWidth(220)
+
+        layout.addWidget(self.loading_label)
+        layout.addWidget(self.loading_bar, stretch=1)
+        return frame
 
     def _create_header_info_card(self, caption: str, value: str, key: str) -> QFrame:
         card = QFrame(self)
@@ -391,16 +439,13 @@ class MainWindow(QMainWindow):
             self._update_connection_state()
             return
 
-        self.find_controller_button.setEnabled(False)
-        self.status_label.setText("Searching for controller...")
-        self.statusBar().showMessage(self.status_label.text())
         self.controller_details_label.setText(
             f"Scanning {len(available_ports)} serial port(s) for a valid controller reply..."
         )
         self._append_log(
             f"Searching {len(available_ports)} serial port(s) for the controller."
         )
-        QApplication.processEvents()
+        self._begin_busy("Searching for controller...")
 
         try:
             result = self.serial_service.find_controller_port(
@@ -408,13 +453,15 @@ class MainWindow(QMainWindow):
                 expected_response_fragment=self.settings.controller_probe_response_fragment,
                 warmup_seconds=self.settings.controller_probe_warmup_seconds,
                 probe_window_seconds=self.settings.controller_probe_window_seconds,
+                progress_callback=self._process_loading_events,
+                port_status_callback=self._update_search_progress,
             )
         except SerialConnectionError as exc:
             QMessageBox.critical(self, "Search failed", str(exc))
             self._update_connection_state()
             return
         finally:
-            self.find_controller_button.setEnabled(True)
+            self._end_busy()
 
         if result is None:
             self._append_log("Controller was not found on the available COM ports.")
@@ -525,34 +572,40 @@ class MainWindow(QMainWindow):
         failure_title: str = "Connection failed",
         show_failure_dialog: bool = True,
     ) -> bool:
+        self.controller_details_label.setText(
+            f"Connecting to {port}. Loading the live controller data now."
+        )
+        self._begin_busy(f"Connecting to {port}...")
+
         try:
             self.serial_service.connect(port)
         except SerialConnectionError as exc:
             self._append_log(f"Connection to {port} failed: {exc}")
             self.controller_details_label.setText(f"Unable to connect to {port}. {exc}")
             self._update_connection_state()
+            self._end_busy()
             if show_failure_dialog:
                 QMessageBox.critical(self, failure_title, str(exc))
             return False
 
         self._append_log(f"Connected to {port} at {self.serial_service.baudrate} baud.")
+        refresh_steps: tuple[tuple[str, Callable[[Callable[[], None] | None], None]], ...] = (
+            ("Loading build info...", self._refresh_build_info),
+            ("Loading controller state...", self._refresh_controller_state),
+            ("Loading external expander status...", self._refresh_external_expander),
+            ("Loading temperature...", self._refresh_temperature),
+        )
+        for status_text, refresh_callback in refresh_steps:
+            self._update_busy(status_text)
+            refresh_callback(progress_callback=self._process_loading_events)
+
         self.controller_details_label.setText(
             f"Connected to {port}. The live controller sections are ready to open."
         )
-        self._refresh_build_info()
-        self._refresh_controller_state()
-        self._refresh_external_expander()
-        self._refresh_temperature()
         self._poll_timer.start()
+        self._end_busy()
         self._update_connection_state()
         return True
-
-    def _schedule_post_flash_reconnect(self, port: str) -> None:
-        self.controller_details_label.setText(
-            f"Firmware flash finished on {port}. Waiting 3 seconds before reconnecting automatically."
-        )
-        self.statusBar().showMessage(f"Waiting 3 seconds before reconnecting to {port}...")
-        QTimer.singleShot(FLASH_RECONNECT_DELAY_MS, lambda port_name=port: self._reconnect_after_flash(port_name))
 
     def _reconnect_after_flash(self, port: str) -> None:
         if self.serial_service.is_connected:
@@ -623,7 +676,7 @@ class MainWindow(QMainWindow):
 
         return True
 
-    def _refresh_build_info(self) -> None:
+    def _refresh_build_info(self, progress_callback: Callable[[], None] | None = None) -> None:
         if not self.serial_service.is_connected:
             self._clear_build_info()
             return
@@ -633,6 +686,7 @@ class MainWindow(QMainWindow):
                 "printBuildInfo",
                 idle_timeout_seconds=0.35,
                 max_duration_seconds=2.0,
+                progress_callback=progress_callback,
             )
         except SerialConnectionError as exc:
             self._clear_build_info()
@@ -661,7 +715,7 @@ class MainWindow(QMainWindow):
         self.firmware_version_value.setToolTip("")
         self.build_date_value.setToolTip("")
 
-    def _refresh_controller_state(self) -> None:
+    def _refresh_controller_state(self, progress_callback: Callable[[], None] | None = None) -> None:
         if not self.serial_service.is_connected:
             self._clear_controller_state()
             return
@@ -671,6 +725,7 @@ class MainWindow(QMainWindow):
                 "getControllerStatus",
                 idle_timeout_seconds=0.35,
                 max_duration_seconds=2.0,
+                progress_callback=progress_callback,
             )
         except SerialConnectionError as exc:
             self._clear_controller_state()
@@ -694,7 +749,7 @@ class MainWindow(QMainWindow):
         self.controller_state_value.setToolTip("")
         self._update_section_button_states()
 
-    def _refresh_external_expander(self) -> None:
+    def _refresh_external_expander(self, progress_callback: Callable[[], None] | None = None) -> None:
         if not self.serial_service.is_connected:
             self._clear_external_expander()
             return
@@ -704,6 +759,7 @@ class MainWindow(QMainWindow):
                 "getExternalExpander",
                 idle_timeout_seconds=0.35,
                 max_duration_seconds=2.0,
+                progress_callback=progress_callback,
             )
         except SerialConnectionError as exc:
             self._clear_external_expander()
@@ -723,7 +779,7 @@ class MainWindow(QMainWindow):
         self.external_expander_value.setText("--")
         self.external_expander_value.setToolTip("")
 
-    def _refresh_temperature(self) -> None:
+    def _refresh_temperature(self, progress_callback: Callable[[], None] | None = None) -> None:
         if not self.serial_service.is_connected:
             self._clear_temperature()
             return
@@ -733,6 +789,7 @@ class MainWindow(QMainWindow):
                 "readTemperature",
                 idle_timeout_seconds=0.35,
                 max_duration_seconds=2.0,
+                progress_callback=progress_callback,
             )
         except SerialConnectionError as exc:
             self._clear_temperature()
@@ -895,24 +952,23 @@ class MainWindow(QMainWindow):
             f"Preparing firmware flash on {selected_port}. Wait for the controller to reboot after flashing completes."
         )
         self._append_log(f"Starting firmware flash on {selected_port} using {firmware_path}.")
-        self._update_connection_state()
+        self._begin_busy(f"Flashing firmware on {selected_port}...")
 
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        self.statusBar().showMessage(f"Flashing firmware on {selected_port}...")
-        QApplication.processEvents()
         try:
-            result = self.firmware_service.flash_firmware(selected_port, firmware_path)
+            result = self._run_blocking_task(
+                lambda: self.firmware_service.flash_firmware(selected_port, firmware_path)
+            )
         finally:
-            QApplication.restoreOverrideCursor()
+            self._end_busy()
 
         self._append_log(result.message)
         if result.success:
             QMessageBox.information(
                 self,
                 "Firmware",
-                f"{result.message}\n\nThe app will try to reconnect to {selected_port} in 3 seconds.",
+                result.message,
             )
-            self._schedule_post_flash_reconnect(selected_port)
+            self._reconnect_after_flash(selected_port)
         else:
             self.controller_details_label.setText(
                 f"Firmware flash failed on {selected_port}. Review the activity log and try again when ready."
@@ -920,7 +976,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Firmware", result.message)
 
         self._update_connection_state()
-
     def _poll_serial_feedback(self) -> None:
         try:
             messages = self.serial_service.read_available()
@@ -946,6 +1001,12 @@ class MainWindow(QMainWindow):
         if not value:
             return None
         return str(value)
+
+    def _update_search_progress(self, port_info, current_index: int, total: int) -> None:
+        self._update_busy(f"Searching {port_info.device} ({current_index}/{total})...")
+        self.controller_details_label.setText(
+            f"Scanning {port_info.device} ({current_index}/{total}) - {port_info.description}. Waiting for a valid controller reply..."
+        )
 
     def _refresh_available_ports(
         self,
@@ -979,26 +1040,87 @@ class MainWindow(QMainWindow):
         self._clear_external_expander()
         self._clear_temperature()
 
+    def _begin_busy(self, status_text: str) -> None:
+        self._busy_operation_active = True
+        self._busy_status_text = status_text
+        self.loading_label.setText(status_text)
+        self.main_loading_frame.setVisible(True)
+        if not self._busy_cursor_active:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            self._busy_cursor_active = True
+        self._update_connection_state()
+        self._process_loading_events()
+
+    def _update_busy(self, status_text: str) -> None:
+        if not self._busy_operation_active:
+            return
+        self._busy_status_text = status_text
+        self.loading_label.setText(status_text)
+        self._update_connection_state()
+        self._process_loading_events()
+
+    def _end_busy(self) -> None:
+        if not self._busy_operation_active:
+            return
+        self._busy_operation_active = False
+        self._busy_status_text = ""
+        self.main_loading_frame.setVisible(False)
+        if self._busy_cursor_active:
+            QApplication.restoreOverrideCursor()
+            self._busy_cursor_active = False
+        self._update_connection_state()
+        self._process_loading_events()
+
+    def _process_loading_events(self) -> None:
+        QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+
+    def _run_blocking_task(self, task: Callable[[], object]) -> object:
+        result: dict[str, object] = {}
+        errors: list[BaseException] = []
+        completed = threading.Event()
+
+        def runner() -> None:
+            try:
+                result["value"] = task()
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                completed.set()
+
+        thread = threading.Thread(target=runner, daemon=True)
+        thread.start()
+        while not completed.wait(0.05):
+            self._process_loading_events()
+        thread.join()
+        self._process_loading_events()
+
+        if errors:
+            raise errors[0]
+        return result.get("value")
+
     def _update_connection_state(self) -> None:
         connected = self.serial_service.is_connected
         selected_port = self._selected_port()
 
         self.connect_button.setText("Disconnect" if connected else "Connect")
-        if connected:
+        if self._busy_operation_active and self._busy_status_text:
+            status_text = self._busy_status_text
+        elif connected:
             status_text = f"Connected to {self.serial_service.port_name}"
         elif selected_port:
             status_text = f"Ready to connect or flash on {selected_port}"
         else:
             status_text = "Disconnected"
 
+        busy = self._busy_operation_active
         self.status_label.setText(status_text)
-        self.sections_group.setEnabled(connected)
+        self.sections_group.setEnabled(connected and not busy)
         self._update_section_button_states()
-        self.firmware_group.setEnabled(True)
-        self.flash_button.setEnabled(connected or bool(selected_port))
-        self.connect_button.setEnabled(connected or bool(selected_port))
-        self.reboot_button.setEnabled(connected)
-        self.find_controller_button.setEnabled(not connected)
+        self.firmware_group.setEnabled(not busy)
+        self.flash_button.setEnabled(not busy and (connected or bool(selected_port)))
+        self.connect_button.setEnabled(not busy and (connected or bool(selected_port)))
+        self.reboot_button.setEnabled(not busy and connected)
+        self.find_controller_button.setEnabled(not busy and not connected)
         self.statusBar().showMessage(status_text)
 
     def _update_section_button_states(self) -> None:
@@ -1015,7 +1137,9 @@ class MainWindow(QMainWindow):
         self.feedback_log.appendPlainText(message)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._end_busy()
         self._poll_timer.stop()
         if self.serial_service.is_connected:
             self.serial_service.disconnect()
         event.accept()
+
