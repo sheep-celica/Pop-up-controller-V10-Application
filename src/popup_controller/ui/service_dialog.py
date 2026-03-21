@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEventLoop, Qt
+from PySide6.QtCore import QDate, QEventLoop, QRegularExpression, Qt
+from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QApplication,
+    QCalendarWidget,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -15,6 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -144,15 +147,20 @@ class ServiceDialog(QDialog):
         layout.setVerticalSpacing(10)
 
         note = QLabel(
-            "Provide all required arguments for writeManufactureData. Car model may contain spaces; the other fields must be single tokens.",
+            "Provide all required arguments for writeManufactureData. Manufacture date is sent as YYYY-MM-DD and uses the date picker below. Car model may contain spaces; the other fields must be single tokens.",
             group,
         )
         note.setObjectName("sectionNote")
         note.setWordWrap(True)
 
-        self.serial_number_input = QLineEdit(group)
-        self.board_serial_input = QLineEdit(group)
-        self.board_revision_input = QLineEdit(group)
+        self.serial_number_input = self._create_single_token_input(group)
+        self.board_serial_input = self._create_single_token_input(group)
+        self.board_revision_input = self._create_single_token_input(group)
+        self.manufacture_date_input = QLineEdit(group)
+        self.manufacture_date_input.setReadOnly(True)
+        self.manufacture_date_input.setText(QDate.currentDate().toString("yyyy-MM-dd"))
+        self.pick_manufacture_date_button = QPushButton("Pick date", group)
+        self.pick_manufacture_date_button.clicked.connect(self.pick_manufacture_date)
         self.car_model_input = QLineEdit(group)
         self.write_manufacture_button = QPushButton("Write manufacture data", group)
         self.write_manufacture_button.clicked.connect(self.write_manufacture_data)
@@ -162,17 +170,31 @@ class ServiceDialog(QDialog):
         layout.addWidget(self.serial_number_input, 1, 1)
         layout.addWidget(QLabel("Board serial", group), 1, 2)
         layout.addWidget(self.board_serial_input, 1, 3)
+        manufacture_date_row = QWidget(group)
+        manufacture_date_row_layout = QHBoxLayout(manufacture_date_row)
+        manufacture_date_row_layout.setContentsMargins(0, 0, 0, 0)
+        manufacture_date_row_layout.setSpacing(8)
+        manufacture_date_row_layout.addWidget(self.manufacture_date_input, stretch=1)
+        manufacture_date_row_layout.addWidget(self.pick_manufacture_date_button)
+
         layout.addWidget(QLabel("Board revision", group), 2, 0)
         layout.addWidget(self.board_revision_input, 2, 1)
-        layout.addWidget(QLabel("Car model", group), 2, 2)
-        layout.addWidget(self.car_model_input, 2, 3)
-        layout.addWidget(self.write_manufacture_button, 3, 3)
+        layout.addWidget(QLabel("Manufacture date", group), 2, 2)
+        layout.addWidget(manufacture_date_row, 2, 3)
+        layout.addWidget(QLabel("Car model", group), 3, 0)
+        layout.addWidget(self.car_model_input, 3, 1, 1, 3)
+        layout.addWidget(self.write_manufacture_button, 4, 3)
         return group
 
     def _build_buttons(self) -> QDialogButtonBox:
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
         buttons.rejected.connect(self.reject)
         return buttons
+
+    def _create_single_token_input(self, parent: QWidget) -> QLineEdit:
+        field = QLineEdit(parent)
+        field.setValidator(QRegularExpressionValidator(QRegularExpression(r"\S*"), field))
+        return field
 
     def clear_statistics(self) -> None:
         if not self.serial_service.is_connected:
@@ -224,11 +246,40 @@ class ServiceDialog(QDialog):
         dialog = VoltageCalibrationDialog(self.serial_service, self)
         dialog.exec()
 
+    def pick_manufacture_date(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select manufacture date")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        calendar = QCalendarWidget(dialog)
+        selected_date = QDate.fromString(self.manufacture_date_input.text().strip(), "yyyy-MM-dd")
+        if not selected_date.isValid():
+            selected_date = QDate.currentDate()
+        calendar.setSelectedDate(selected_date)
+        calendar.setGridVisible(True)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        layout.addWidget(calendar)
+        layout.addWidget(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.manufacture_date_input.setText(calendar.selectedDate().toString("yyyy-MM-dd"))
+
     def write_manufacture_data(self) -> None:
         values = {
             "serial number": self.serial_number_input.text().strip(),
             "board serial": self.board_serial_input.text().strip(),
             "board revision": self.board_revision_input.text().strip(),
+            "manufacture date": self.manufacture_date_input.text().strip(),
             "car model": self.car_model_input.text().strip(),
         }
         missing = [label for label, value in values.items() if not value]
@@ -240,7 +291,7 @@ class ServiceDialog(QDialog):
             )
             return
 
-        for label in ("serial number", "board serial", "board revision"):
+        for label in ("serial number", "board serial", "board revision", "manufacture date"):
             if any(character.isspace() for character in values[label]):
                 QMessageBox.warning(
                     self,
@@ -250,8 +301,8 @@ class ServiceDialog(QDialog):
                 return
 
         command = (
-            f"writeManufactureData {values['serial number']} {values['board serial']} "
-            f"{values['board revision']} {values['car model']}"
+            f"writeManufactureData {values['manufacture date']} {values['serial number']} "
+            f"{values['board serial']} {values['board revision']} {values['car model']}"
         )
         self._submit_service_command(
             command,

@@ -136,7 +136,7 @@ SECTION_DEFINITIONS: tuple[SectionDefinition, ...] = (
         ),
         source_commands=(
             "clearStatisticalData <password>",
-            "writeManufactureData <serial_number> <board_serial> <board_revision> <car_model...>",
+            "writeManufactureData <manufacture_date> <serial_number> <board_serial> <board_revision> <car_model...>",
         ),
     ),
 )

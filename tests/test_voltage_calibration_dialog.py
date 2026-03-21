@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import QMessageBox
 
 from popup_controller.services.voltage_calibration_service import VoltageMeasurementPoint
@@ -71,6 +72,86 @@ def test_voltage_calibration_dialog_calculates_and_saves_constants(qtbot, monkey
 
     assert serial_service.commands == ["writeBatteryVoltageCalibration 1.100000 -0.800000"]
     assert "updated" in dialog.status_label.text().lower()
+
+
+def test_service_dialog_defaults_manufacture_date_to_today(qtbot) -> None:
+    serial_service = FakeSerialService()
+    dialog = ServiceDialog(serial_service)
+    qtbot.addWidget(dialog)
+
+    assert dialog.manufacture_date_input.text() == QDate.currentDate().toString("yyyy-MM-dd")
+    assert dialog.manufacture_date_input.isReadOnly() is True
+    assert dialog.pick_manufacture_date_button.text() == "Pick date"
+
+
+def test_service_dialog_restricts_whitespace_to_non_car_model_fields(qtbot) -> None:
+    serial_service = FakeSerialService()
+    dialog = ServiceDialog(serial_service)
+    qtbot.addWidget(dialog)
+
+    dialog.serial_number_input.setText("SN 123")
+
+    assert dialog.serial_number_input.hasAcceptableInput() is False
+    assert dialog.board_serial_input.validator() is not None
+    assert dialog.board_revision_input.validator() is not None
+    assert dialog.car_model_input.validator() is None
+
+
+def test_service_dialog_rejects_spaces_in_manufacture_date_value(qtbot, monkeypatch) -> None:
+    serial_service = FakeSerialService()
+    dialog = ServiceDialog(serial_service)
+    qtbot.addWidget(dialog)
+
+    warnings: list[tuple[str, str]] = []
+
+    def fake_warning(parent, title, text):
+        warnings.append((title, text))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "warning", fake_warning)
+    monkeypatch.setattr(dialog, "_submit_service_command", lambda *args, **kwargs: True)
+
+    dialog.serial_number_input.setText("SN123")
+    dialog.board_serial_input.setText("BOARD456")
+    dialog.board_revision_input.setText("REV7")
+    dialog.manufacture_date_input.setText("2026 03 21")
+    dialog.car_model_input.setText("Toyota Celica")
+
+    dialog.write_manufacture_data()
+
+    assert warnings == [("Manufacture data", "Manufacture Date must be a single token without spaces.")]
+
+
+def test_service_dialog_writes_manufacture_data_with_selected_date(qtbot, monkeypatch) -> None:
+    serial_service = FakeSerialService()
+    dialog = ServiceDialog(serial_service)
+    qtbot.addWidget(dialog)
+
+    captured: dict[str, str] = {}
+
+    def fake_submit(command: str, busy_message: str, error_title: str, success_message: str) -> bool:
+        captured["command"] = command
+        captured["busy_message"] = busy_message
+        captured["error_title"] = error_title
+        captured["success_message"] = success_message
+        return True
+
+    monkeypatch.setattr(dialog, "_submit_service_command", fake_submit)
+
+    dialog.serial_number_input.setText("SN123")
+    dialog.board_serial_input.setText("BOARD456")
+    dialog.board_revision_input.setText("REV7")
+    dialog.manufacture_date_input.setText("2026-03-21")
+    dialog.car_model_input.setText("Toyota Celica")
+
+    dialog.write_manufacture_data()
+
+    assert captured == {
+        "command": "writeManufactureData 2026-03-21 SN123 BOARD456 REV7 Toyota Celica",
+        "busy_message": "Writing manufacture data...",
+        "error_title": "Write manufacture data failed",
+        "success_message": "Controller manufacture data write command accepted.",
+    }
 
 
 def test_service_dialog_opens_voltage_calibration_dialog(qtbot, monkeypatch) -> None:
