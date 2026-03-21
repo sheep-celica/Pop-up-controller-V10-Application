@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -38,6 +39,33 @@ from popup_controller.services.settings_service import (
 REMOTE_INPUT_LABELS = ("RH Wink", "LH Wink", "Both Wink", "Toggle Sleepy Eye Mode")
 FULL_SETTINGS_IDLE_TIMEOUT_SECONDS = 0.20
 SINGLE_VALUE_IDLE_TIMEOUT_SECONDS = 0.15
+SETTINGS_SECTION_DEFINITIONS = (
+    (
+        "safety",
+        "Safety",
+        "Sleepy eyes with headlights and remote inputs with light-switch.",
+    ),
+    (
+        "popup",
+        "Pop-up settings",
+        "Minimum state persistence, sensing delay, and timing calibration.",
+    ),
+    (
+        "remote",
+        "Remote",
+        "Input mapping and remote inputs with light-switch.",
+    ),
+    (
+        "idle",
+        "Idle",
+        "Idle time to power off.",
+    ),
+    (
+        "other",
+        "Other",
+        "Battery voltage calibration and live voltage reading.",
+    ),
+)
 
 
 class SettingsDialog(QDialog):
@@ -52,6 +80,10 @@ class SettingsDialog(QDialog):
         self.reference_image_path = reference_image_path or Path(__file__).resolve().parent.parent / "assets" / "remote_mapping.png"
         self._busy = False
         self._initial_load_scheduled = False
+        self.settings_section_buttons: dict[str, QPushButton] = {}
+        self.settings_section_pages: dict[str, QWidget] = {}
+        self.remote_inputs_with_headlights_combos: list[QComboBox] = []
+        self.current_settings_section_id = SETTINGS_SECTION_DEFINITIONS[0][0]
 
         self.setWindowTitle("Settings")
 
@@ -63,7 +95,7 @@ class SettingsDialog(QDialog):
         title_label.setObjectName("dialogTitle")
 
         summary_label = QLabel(
-            "This dialog loads live controller settings when it opens. Each section shows the current controller state first, then separates the new values you can write back.",
+            "This dialog loads live controller settings when it opens. Use the section buttons below to switch categories; each section shows the current controller state first, then the values you can write back.",
             self,
         )
         summary_label.setObjectName("dialogSummary")
@@ -76,6 +108,7 @@ class SettingsDialog(QDialog):
         self.loading_frame = self._build_loading_frame()
         self.loading_slot = create_fixed_loading_slot(self, self.loading_frame)
         self.scroll_area = self._build_scroll_area()
+        self._show_settings_section(self.current_settings_section_id)
         buttons = self._build_buttons()
 
         root_layout.addWidget(title_label)
@@ -123,23 +156,44 @@ class SettingsDialog(QDialog):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
 
-        self.battery_group = self._build_battery_group()
+        self.section_navigation_group = self._build_section_navigation_group()
+        self.section_stack = QStackedWidget(self.content_widget)
         self.sleepy_eye_group = self._build_sleepy_eye_group()
         self.remote_inputs_with_light_switch_group = self._build_remote_inputs_with_light_switch_group()
+        self.safety_remote_inputs_with_light_switch_group = self._build_remote_inputs_with_light_switch_group(
+            metric_key="safety_remote_inputs_with_headlights",
+            combo_attr="safety_remote_inputs_with_headlights_combo",
+            button_attr="safety_remote_inputs_with_headlights_update_button",
+        )
         self.idle_power_group = self._build_idle_power_group()
         self.min_state_group = self._build_min_state_group()
         self.sensing_delay_group = self._build_sensing_delay_group()
         self.remote_mapping_group = self._build_remote_mapping_group()
         self.timing_group = self._build_timing_group()
+        self.battery_group = self._build_battery_group()
 
-        content_layout.addWidget(self.battery_group)
-        content_layout.addWidget(self.sleepy_eye_group)
-        content_layout.addWidget(self.remote_inputs_with_light_switch_group)
-        content_layout.addWidget(self.idle_power_group)
-        content_layout.addWidget(self.min_state_group)
-        content_layout.addWidget(self.sensing_delay_group)
-        content_layout.addWidget(self.remote_mapping_group)
-        content_layout.addWidget(self.timing_group)
+        self.settings_section_pages = {
+            "safety": self._create_settings_section_page(
+                self.sleepy_eye_group,
+                self.safety_remote_inputs_with_light_switch_group,
+            ),
+            "popup": self._create_settings_section_page(
+                self.min_state_group,
+                self.sensing_delay_group,
+                self.timing_group,
+            ),
+            "remote": self._create_settings_section_page(
+                self.remote_mapping_group,
+                self.remote_inputs_with_light_switch_group,
+            ),
+            "idle": self._create_settings_section_page(self.idle_power_group),
+            "other": self._create_settings_section_page(self.battery_group),
+        }
+        for section_id, _title, _summary in SETTINGS_SECTION_DEFINITIONS:
+            self.section_stack.addWidget(self.settings_section_pages[section_id])
+
+        content_layout.addWidget(self.section_navigation_group)
+        content_layout.addWidget(self.section_stack)
         content_layout.addStretch(1)
 
         scroll_area.setWidget(self.content_widget)
@@ -152,6 +206,55 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         self.refresh_button.clicked.connect(lambda: self.load_settings())
         return buttons
+
+    def _build_section_navigation_group(self) -> QGroupBox:
+        group = QGroupBox("Sections", self.content_widget)
+        layout = QGridLayout(group)
+        layout.setHorizontalSpacing(12)
+        layout.setVerticalSpacing(12)
+
+        section_count = len(SETTINGS_SECTION_DEFINITIONS)
+        for index, (section_id, title, summary) in enumerate(SETTINGS_SECTION_DEFINITIONS):
+            button = QPushButton(f"{title}\n{summary}", group)
+            button.setProperty("sectionButton", True)
+            button.setMinimumHeight(72)
+            button.clicked.connect(lambda _checked=False, current_id=section_id: self._show_settings_section(current_id))
+
+            row = index // 2
+            column = index % 2
+            if index == section_count - 1 and section_count % 2 == 1:
+                layout.addWidget(button, row, 0, 1, 2)
+            else:
+                layout.addWidget(button, row, column)
+            self.settings_section_buttons[section_id] = button
+
+        return group
+
+    def _create_settings_section_page(self, *groups: QGroupBox) -> QWidget:
+        page = QWidget(self.section_stack)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        for group in groups:
+            layout.addWidget(group)
+        layout.addStretch(1)
+        return page
+
+    def _show_settings_section(self, section_id: str) -> None:
+        page = self.settings_section_pages.get(section_id)
+        if page is None:
+            return
+
+        self.current_settings_section_id = section_id
+        self.section_stack.setCurrentWidget(page)
+        for current_id, button in self.settings_section_buttons.items():
+            button.setProperty("accent", current_id == section_id)
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
+
+        if hasattr(self, "scroll_area"):
+            self.scroll_area.verticalScrollBar().setValue(0)
 
     def _build_battery_group(self) -> QGroupBox:
         group = QGroupBox("Battery voltage calibration", self.content_widget)
@@ -241,7 +344,12 @@ class SettingsDialog(QDialog):
         layout.addWidget(editor)
         return group
 
-    def _build_remote_inputs_with_light_switch_group(self) -> QGroupBox:
+    def _build_remote_inputs_with_light_switch_group(
+        self,
+        metric_key: str = "remote_inputs_with_headlights",
+        combo_attr: str = "remote_inputs_with_headlights_combo",
+        button_attr: str = "remote_inputs_with_headlights_update_button",
+    ) -> QGroupBox:
         group = QGroupBox("Remote inputs with light-switch", self.content_widget)
         layout = QVBoxLayout(group)
         layout.setSpacing(10)
@@ -249,7 +357,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self._create_section_heading("Current settings", group))
         current_row = QHBoxLayout()
         current_row.setSpacing(12)
-        current_row.addWidget(self._create_metric_card("Current value", "remote_inputs_with_headlights", "controller flag"))
+        current_row.addWidget(self._create_metric_card("Current value", metric_key, "controller flag"))
         current_row.addStretch(1)
         layout.addLayout(current_row)
 
@@ -269,16 +377,22 @@ class SettingsDialog(QDialog):
             4,
         )
 
-        self.remote_inputs_with_headlights_combo = QComboBox(editor)
-        self.remote_inputs_with_headlights_combo.addItems(["TRUE", "FALSE"])
-        self.remote_inputs_with_headlights_update_button = QPushButton("Update setting", editor)
+        combo = QComboBox(editor)
+        combo.addItems(["TRUE", "FALSE"])
+        combo.currentTextChanged.connect(self._sync_remote_inputs_with_headlights_combos)
+        button = QPushButton("Update setting", editor)
+        setattr(self, combo_attr, combo)
+        setattr(self, button_attr, button)
+        self.remote_inputs_with_headlights_combos.append(combo)
 
         editor_layout.addWidget(QLabel("New value", editor), 1, 0)
-        editor_layout.addWidget(self.remote_inputs_with_headlights_combo, 1, 1)
-        editor_layout.addWidget(self.remote_inputs_with_headlights_update_button, 1, 3)
+        editor_layout.addWidget(combo, 1, 1)
+        editor_layout.addWidget(button, 1, 3)
 
-        self.remote_inputs_with_headlights_update_button.clicked.connect(
-            self.update_remote_inputs_with_headlights_setting
+        button.clicked.connect(
+            lambda _checked=False, current_combo_attr=combo_attr: self.update_remote_inputs_with_headlights_setting(
+                current_combo_attr
+            )
         )
         layout.addWidget(editor)
         return group
@@ -554,6 +668,17 @@ class SettingsDialog(QDialog):
         combo.addItems(["1", "2", "3", "4"])
         return combo
 
+    def _sync_remote_inputs_with_headlights_combos(self, value: str) -> None:
+        if not value:
+            return
+
+        for combo in self.remote_inputs_with_headlights_combos:
+            if combo.currentText() == value:
+                continue
+            signals_were_blocked = combo.blockSignals(True)
+            combo.setCurrentText(value)
+            combo.blockSignals(signals_were_blocked)
+
     def load_settings(self, busy_message: str = "Loading controller settings...") -> None:
         if not self.serial_service.is_connected:
             self.status_label.setText("Connect to the controller before opening settings.")
@@ -635,14 +760,20 @@ class SettingsDialog(QDialog):
         if snapshot.allow_sleepy_eye_with_headlights is not None:
             self.sleepy_eye_combo.setCurrentText("TRUE" if snapshot.allow_sleepy_eye_with_headlights else "FALSE")
 
+        remote_inputs_with_headlights_value = self._format_bool(snapshot.allow_remote_inputs_with_headlights)
         remote_inputs_with_headlights_suffix = snapshot.remote_inputs_with_headlights_status or "controller flag"
         self._set_metric_card(
             "remote_inputs_with_headlights",
-            self._format_bool(snapshot.allow_remote_inputs_with_headlights),
+            remote_inputs_with_headlights_value,
+            remote_inputs_with_headlights_suffix,
+        )
+        self._set_metric_card(
+            "safety_remote_inputs_with_headlights",
+            remote_inputs_with_headlights_value,
             remote_inputs_with_headlights_suffix,
         )
         if snapshot.allow_remote_inputs_with_headlights is not None:
-            self.remote_inputs_with_headlights_combo.setCurrentText(
+            self._sync_remote_inputs_with_headlights_combos(
                 "TRUE" if snapshot.allow_remote_inputs_with_headlights else "FALSE"
             )
 
@@ -770,10 +901,15 @@ class SettingsDialog(QDialog):
             "Sleepy-eye setting update failed",
         )
 
-    def update_remote_inputs_with_headlights_setting(self) -> None:
-        value = self.remote_inputs_with_headlights_combo.currentText().strip().lower()
+    def update_remote_inputs_with_headlights_setting(
+        self,
+        combo_attr: str = "remote_inputs_with_headlights_combo",
+    ) -> None:
+        combo = getattr(self, combo_attr)
+        value = combo.currentText().strip().upper()
+        self._sync_remote_inputs_with_headlights_combos(value)
         self._submit_update_command(
-            f"writeRemoteInputsWithHeadlights {value}",
+            f"writeRemoteInputsWithHeadlights {value.lower()}",
             "Updating remote inputs with light-switch setting...",
             "Remote inputs with light-switch update failed",
         )

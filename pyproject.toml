@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "popup-controller"
-version = "1.0.8"
+version = "1.0.9"
 description = "PySide6 Windows desktop application for controlling and flashing an ESP32 pop-up controller over serial."
 readme = "README.md"
 requires-python = ">=3.11"

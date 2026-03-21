@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 import threading
 
-from PySide6.QtCore import QEventLoop, Qt, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QIcon, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -90,6 +90,8 @@ class MainWindow(QMainWindow):
         self._busy_operation_active = False
         self._busy_status_text = ""
         self._busy_cursor_active = False
+        self._busy_scroll_value: int | None = None
+        self._suppress_scroll_wheel = False
 
         self._build_ui()
         self._connect_signals()
@@ -113,6 +115,12 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self._update_responsive_layouts()
 
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.central_scroll_area.viewport() and event.type() == QEvent.Type.Wheel:
+            if self._suppress_scroll_wheel:
+                return True
+        return super().eventFilter(watched, event)
+
     def _auto_refresh_latest_firmware(self) -> None:
         self._fetch_latest_firmware_release(show_error_dialog=False)
 
@@ -127,6 +135,7 @@ class MainWindow(QMainWindow):
         self.central_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.central_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.central_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.central_scroll_area.viewport().installEventFilter(self)
 
         scroll_content = QWidget(self.central_scroll_area)
         root_layout = QVBoxLayout(scroll_content)
@@ -1040,7 +1049,20 @@ class MainWindow(QMainWindow):
         self._clear_external_expander()
         self._clear_temperature()
 
+    def _restore_busy_scroll_position(self) -> None:
+        if self._busy_scroll_value is None:
+            return
+        self.central_scroll_area.verticalScrollBar().setValue(self._busy_scroll_value)
+
+    def _release_busy_scroll_guard(self) -> None:
+        self._restore_busy_scroll_position()
+        self._busy_scroll_value = None
+        self._suppress_scroll_wheel = False
+
     def _begin_busy(self, status_text: str) -> None:
+        if not self._busy_operation_active:
+            self._busy_scroll_value = self.central_scroll_area.verticalScrollBar().value()
+        self._suppress_scroll_wheel = True
         self._busy_operation_active = True
         self._busy_status_text = status_text
         self.loading_label.setText(status_text)
@@ -1050,6 +1072,8 @@ class MainWindow(QMainWindow):
             self._busy_cursor_active = True
         self._update_connection_state()
         self._process_loading_events()
+        self._restore_busy_scroll_position()
+        QTimer.singleShot(0, self._restore_busy_scroll_position)
 
     def _update_busy(self, status_text: str) -> None:
         if not self._busy_operation_active:
@@ -1070,6 +1094,9 @@ class MainWindow(QMainWindow):
             self._busy_cursor_active = False
         self._update_connection_state()
         self._process_loading_events()
+        self._restore_busy_scroll_position()
+        QTimer.singleShot(0, self._restore_busy_scroll_position)
+        QTimer.singleShot(150, self._release_busy_scroll_guard)
 
     def _process_loading_events(self) -> None:
         QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)

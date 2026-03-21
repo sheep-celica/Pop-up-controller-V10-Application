@@ -10,7 +10,7 @@ from popup_controller.ui import main_window as main_window_module
 from popup_controller.ui import settings_dialog as settings_dialog_module
 from popup_controller.ui.main_window import MainWindow
 from popup_controller.ui.sections import SECTION_DEFINITIONS
-from popup_controller.ui.settings_dialog import SettingsDialog
+from popup_controller.ui.settings_dialog import SETTINGS_SECTION_DEFINITIONS, SettingsDialog
 
 
 SETTINGS_RESPONSE = """[2185281] Battery voltage calibration constants: a=1.001585, b=0.097071
@@ -151,6 +151,40 @@ def test_main_window_passes_remote_mapping_reference_path_to_settings_dialog(qtb
     }
 
 
+def test_settings_dialog_organizes_settings_into_clickable_sections(qtbot) -> None:
+    dialog = SettingsDialog(serial_service=FakeSerialService())
+    qtbot.addWidget(dialog)
+
+    assert dialog.current_settings_section_id == "safety"
+    assert dialog.section_stack.currentWidget() is dialog.settings_section_pages["safety"]
+    assert set(dialog.settings_section_buttons) == {section_id for section_id, _title, _summary in SETTINGS_SECTION_DEFINITIONS}
+    assert dialog.sleepy_eye_group.parentWidget() is dialog.settings_section_pages["safety"]
+    assert dialog.safety_remote_inputs_with_light_switch_group.parentWidget() is dialog.settings_section_pages["safety"]
+    assert dialog.remote_inputs_with_light_switch_group.parentWidget() is dialog.settings_section_pages["remote"]
+    assert dialog.timing_group.parentWidget() is dialog.settings_section_pages["popup"]
+
+    dialog._set_busy(False)
+    dialog.settings_section_buttons["remote"].click()
+
+    assert dialog.current_settings_section_id == "remote"
+    assert dialog.section_stack.currentWidget() is dialog.settings_section_pages["remote"]
+    assert dialog.settings_section_buttons["remote"].property("accent") is True
+    assert dialog.settings_section_buttons["safety"].property("accent") is False
+
+
+def test_settings_dialog_syncs_remote_inputs_with_light_switch_between_sections(qtbot) -> None:
+    dialog = SettingsDialog(serial_service=FakeSerialService())
+    qtbot.addWidget(dialog)
+
+    dialog.remote_inputs_with_headlights_combo.setCurrentText("FALSE")
+
+    assert dialog.safety_remote_inputs_with_headlights_combo.currentText() == "FALSE"
+
+    dialog.safety_remote_inputs_with_headlights_combo.setCurrentText("TRUE")
+
+    assert dialog.remote_inputs_with_headlights_combo.currentText() == "TRUE"
+
+
 def test_settings_dialog_loads_sensing_delay_setting(qtbot) -> None:
     serial_service = FakeSerialService(
         request_responses={
@@ -172,7 +206,9 @@ def test_settings_dialog_loads_sensing_delay_setting(qtbot) -> None:
     assert dialog.sensing_delay_value.text() == "1,000 us"
     assert dialog.sensing_delay_spin.value() == 1000
     assert dialog.remote_inputs_with_headlights_value.text() == "FALSE"
+    assert dialog.safety_remote_inputs_with_headlights_value.text() == "FALSE"
     assert dialog.remote_inputs_with_headlights_combo.currentText() == "FALSE"
+    assert dialog.safety_remote_inputs_with_headlights_combo.currentText() == "FALSE"
 
 
 def test_settings_dialog_updates_sensing_delay_with_expected_command(qtbot, monkeypatch) -> None:
@@ -196,6 +232,31 @@ def test_settings_dialog_updates_sensing_delay_with_expected_command(qtbot, monk
         "command": "writePopUpSensingDelayUs 1234",
         "busy_message": "Updating pop-up sensing delay...",
         "error_title": "Pop-up sensing delay update failed",
+    }
+
+
+def test_settings_dialog_updates_remote_inputs_with_light_switch_from_safety_section(qtbot, monkeypatch) -> None:
+    dialog = SettingsDialog(serial_service=FakeSerialService())
+    qtbot.addWidget(dialog)
+
+    captured: dict[str, str] = {}
+
+    def fake_submit(command: str, busy_message: str, error_title: str) -> bool:
+        captured["command"] = command
+        captured["busy_message"] = busy_message
+        captured["error_title"] = error_title
+        return True
+
+    monkeypatch.setattr(dialog, "_submit_update_command", fake_submit)
+    dialog.safety_remote_inputs_with_headlights_combo.setCurrentText("FALSE")
+
+    dialog.update_remote_inputs_with_headlights_setting("safety_remote_inputs_with_headlights_combo")
+
+    assert dialog.remote_inputs_with_headlights_combo.currentText() == "FALSE"
+    assert captured == {
+        "command": "writeRemoteInputsWithHeadlights false",
+        "busy_message": "Updating remote inputs with light-switch setting...",
+        "error_title": "Remote inputs with light-switch update failed",
     }
 
 

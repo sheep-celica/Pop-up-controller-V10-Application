@@ -134,6 +134,35 @@ def test_main_window_uses_scroll_area_for_overflow_content(qtbot) -> None:
     assert window.central_scroll_area.verticalScrollBar().maximum() > 0
 
 
+def test_main_window_preserves_scroll_position_after_busy_cycle(qtbot) -> None:
+    settings = AppSettings(auto_check_latest_firmware_on_startup=False)
+    window = MainWindow(
+        settings=settings,
+        serial_service=FakeSerialService(connected=False),
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    window.resize(settings.default_window_width, settings.default_window_height)
+    window.show()
+    qtbot.wait(50)
+
+    scroll_bar = window.central_scroll_area.verticalScrollBar()
+    scroll_bar.setValue(scroll_bar.maximum())
+    qtbot.wait(10)
+    scroll_bar.setValue(0)
+    qtbot.wait(10)
+
+    assert scroll_bar.value() == 0
+
+    window._begin_busy("Searching for controller...")
+    scroll_bar.setValue(min(scroll_bar.maximum(), 80))
+    window._end_busy()
+    qtbot.wait(200)
+
+    assert scroll_bar.value() == 0
+
+
 def test_main_window_reflows_header_cards_on_narrow_width(qtbot) -> None:
     settings = AppSettings(auto_check_latest_firmware_on_startup=False)
     window = MainWindow(
