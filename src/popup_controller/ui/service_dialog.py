@@ -5,6 +5,7 @@ from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QApplication,
     QCalendarWidget,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from popup_controller.manufacture_options import BOARD_REVISION_OPTIONS, CAR_MODEL_OPTIONS
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
 from popup_controller.ui.voltage_calibration_dialog import VoltageCalibrationDialog
 from popup_controller.ui.window_helpers import apply_initial_window_size, create_fixed_loading_slot, create_scrollable_dialog_layout
@@ -147,7 +149,12 @@ class ServiceDialog(QDialog):
         layout.setVerticalSpacing(10)
 
         note = QLabel(
-            "Provide all required arguments for writeManufactureData. Manufacture date is sent as YYYY-MM-DD and uses the date picker below. Car model may contain spaces; the other fields must be single tokens.",
+            (
+                "Provide all required arguments for writeManufactureData. Manufacture date is sent as "
+                "YYYY-MM-DD and uses the date picker below. Board revision and car model are selected "
+                "from the configured dropdowns, while serial number and board serial must remain "
+                "single tokens."
+            ),
             group,
         )
         note.setObjectName("sectionNote")
@@ -155,13 +162,21 @@ class ServiceDialog(QDialog):
 
         self.serial_number_input = self._create_single_token_input(group)
         self.board_serial_input = self._create_single_token_input(group)
-        self.board_revision_input = self._create_single_token_input(group)
+        self.board_revision_combo = self._create_option_combo(
+            group,
+            BOARD_REVISION_OPTIONS,
+            "Select board revision",
+        )
         self.manufacture_date_input = QLineEdit(group)
         self.manufacture_date_input.setReadOnly(True)
         self.manufacture_date_input.setText(QDate.currentDate().toString("yyyy-MM-dd"))
         self.pick_manufacture_date_button = QPushButton("Pick date", group)
         self.pick_manufacture_date_button.clicked.connect(self.pick_manufacture_date)
-        self.car_model_input = QLineEdit(group)
+        self.car_model_combo = self._create_option_combo(
+            group,
+            CAR_MODEL_OPTIONS,
+            "Select car model",
+        )
         self.write_manufacture_button = QPushButton("Write manufacture data", group)
         self.write_manufacture_button.clicked.connect(self.write_manufacture_data)
 
@@ -178,11 +193,11 @@ class ServiceDialog(QDialog):
         manufacture_date_row_layout.addWidget(self.pick_manufacture_date_button)
 
         layout.addWidget(QLabel("Board revision", group), 2, 0)
-        layout.addWidget(self.board_revision_input, 2, 1)
+        layout.addWidget(self.board_revision_combo, 2, 1)
         layout.addWidget(QLabel("Manufacture date", group), 2, 2)
         layout.addWidget(manufacture_date_row, 2, 3)
         layout.addWidget(QLabel("Car model", group), 3, 0)
-        layout.addWidget(self.car_model_input, 3, 1, 1, 3)
+        layout.addWidget(self.car_model_combo, 3, 1, 1, 3)
         layout.addWidget(self.write_manufacture_button, 4, 3)
         return group
 
@@ -195,6 +210,18 @@ class ServiceDialog(QDialog):
         field = QLineEdit(parent)
         field.setValidator(QRegularExpressionValidator(QRegularExpression(r"\S*"), field))
         return field
+
+    def _create_option_combo(
+        self,
+        parent: QWidget,
+        options: tuple[str, ...],
+        placeholder: str,
+    ) -> QComboBox:
+        combo = QComboBox(parent)
+        combo.addItems(options)
+        combo.setPlaceholderText(placeholder)
+        combo.setCurrentIndex(-1)
+        return combo
 
     def clear_statistics(self) -> None:
         if not self.serial_service.is_connected:
@@ -278,9 +305,9 @@ class ServiceDialog(QDialog):
         values = {
             "serial number": self.serial_number_input.text().strip(),
             "board serial": self.board_serial_input.text().strip(),
-            "board revision": self.board_revision_input.text().strip(),
+            "board revision": self.board_revision_combo.currentText().strip(),
             "manufacture date": self.manufacture_date_input.text().strip(),
-            "car model": self.car_model_input.text().strip(),
+            "car model": self.car_model_combo.currentText().strip(),
         }
         missing = [label for label, value in values.items() if not value]
         if missing:

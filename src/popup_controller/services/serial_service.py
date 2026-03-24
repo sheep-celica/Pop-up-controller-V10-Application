@@ -99,6 +99,40 @@ class SerialService:
         except SerialException as exc:
             raise SerialConnectionError(f"Unable to open {port}: {exc}") from exc
 
+    def connect_to_controller(
+        self,
+        port: str,
+        probe_command: str = "help",
+        expected_response_fragment: str = "Available commands:",
+        warmup_seconds: float = 0.0,
+        probe_window_seconds: float = 1.2,
+        progress_callback: Callable[[], None] | None = None,
+    ) -> str:
+        self.connect(port)
+
+        try:
+            if warmup_seconds > 0.0:
+                self._wait_with_progress(warmup_seconds, progress_callback)
+
+            response = self.request_text(
+                probe_command,
+                idle_timeout_seconds=min(0.35, max(0.1, probe_window_seconds / 3)),
+                max_duration_seconds=max(probe_window_seconds, self.timeout_seconds),
+                progress_callback=progress_callback,
+            )
+        except SerialConnectionError:
+            self.disconnect()
+            raise
+
+        if expected_response_fragment not in response:
+            self.disconnect()
+            raise SerialConnectionError(
+                f"{port} opened, but the device did not answer the controller probe. "
+                "It may be an unflashed ESP32. You can still flash firmware to this port."
+            )
+
+        return response
+
     def disconnect(self) -> None:
         if self._serial and self._serial.is_open:
             self._serial.close()

@@ -3,6 +3,7 @@
 from PySide6.QtCore import QDate
 from PySide6.QtWidgets import QMessageBox
 
+from popup_controller.manufacture_options import BOARD_REVISION_OPTIONS, CAR_MODEL_OPTIONS
 from popup_controller.services.voltage_calibration_service import VoltageMeasurementPoint
 from popup_controller.ui import service_dialog as service_dialog_module
 from popup_controller.ui.service_dialog import ServiceDialog
@@ -84,7 +85,7 @@ def test_service_dialog_defaults_manufacture_date_to_today(qtbot) -> None:
     assert dialog.pick_manufacture_date_button.text() == "Pick date"
 
 
-def test_service_dialog_restricts_whitespace_to_non_car_model_fields(qtbot) -> None:
+def test_service_dialog_uses_configured_dropdowns_for_revision_and_car_model(qtbot) -> None:
     serial_service = FakeSerialService()
     dialog = ServiceDialog(serial_service)
     qtbot.addWidget(dialog)
@@ -93,8 +94,16 @@ def test_service_dialog_restricts_whitespace_to_non_car_model_fields(qtbot) -> N
 
     assert dialog.serial_number_input.hasAcceptableInput() is False
     assert dialog.board_serial_input.validator() is not None
-    assert dialog.board_revision_input.validator() is not None
-    assert dialog.car_model_input.validator() is None
+    assert dialog.board_revision_combo.count() == len(BOARD_REVISION_OPTIONS)
+    assert [dialog.board_revision_combo.itemText(index) for index in range(dialog.board_revision_combo.count())] == list(
+        BOARD_REVISION_OPTIONS
+    )
+    assert dialog.board_revision_combo.currentIndex() == -1
+    assert dialog.car_model_combo.count() == len(CAR_MODEL_OPTIONS)
+    assert [dialog.car_model_combo.itemText(index) for index in range(dialog.car_model_combo.count())] == list(
+        CAR_MODEL_OPTIONS
+    )
+    assert dialog.car_model_combo.currentIndex() == -1
 
 
 def test_service_dialog_rejects_spaces_in_manufacture_date_value(qtbot, monkeypatch) -> None:
@@ -113,9 +122,9 @@ def test_service_dialog_rejects_spaces_in_manufacture_date_value(qtbot, monkeypa
 
     dialog.serial_number_input.setText("SN123")
     dialog.board_serial_input.setText("BOARD456")
-    dialog.board_revision_input.setText("REV7")
+    dialog.board_revision_combo.setCurrentText("Revision_C")
     dialog.manufacture_date_input.setText("2026 03 21")
-    dialog.car_model_input.setText("Toyota Celica")
+    dialog.car_model_combo.setCurrentText("T18_Toyota_Celica")
 
     dialog.write_manufacture_data()
 
@@ -140,14 +149,14 @@ def test_service_dialog_writes_manufacture_data_with_selected_date(qtbot, monkey
 
     dialog.serial_number_input.setText("SN123")
     dialog.board_serial_input.setText("BOARD456")
-    dialog.board_revision_input.setText("REV7")
+    dialog.board_revision_combo.setCurrentText("Revision_C")
     dialog.manufacture_date_input.setText("2026-03-21")
-    dialog.car_model_input.setText("Toyota Celica")
+    dialog.car_model_combo.setCurrentText("T18_Toyota_Celica")
 
     dialog.write_manufacture_data()
 
     assert captured == {
-        "command": "writeManufactureData 2026-03-21 SN123 BOARD456 REV7 Toyota Celica",
+        "command": "writeManufactureData 2026-03-21 SN123 BOARD456 Revision_C T18_Toyota_Celica",
         "busy_message": "Writing manufacture data...",
         "error_title": "Write manufacture data failed",
         "success_message": "Controller manufacture data write command accepted.",

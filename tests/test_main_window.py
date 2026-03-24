@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QMessageBox, QScrollArea
 from popup_controller.config import AppSettings
 from popup_controller.services.firmware_service import FlashResult
 from popup_controller.services.firmware_release_service import FirmwareDownloadResult, FirmwareReleaseInfo
-from popup_controller.services.serial_service import SerialPortInfo
+from popup_controller.services.serial_service import SerialConnectionError, SerialPortInfo
 from popup_controller.ui import main_window as main_window_module
 from popup_controller.ui.main_window import MainWindow
 from popup_controller.ui.sections import SECTION_DEFINITIONS
@@ -44,6 +44,23 @@ class FakeSerialService:
         self.connect_calls.append(port)
         self._connected = True
         self._port_name = port
+
+    def connect_to_controller(
+        self,
+        port: str,
+        probe_command: str = "help",
+        expected_response_fragment: str = "Available commands:",
+        **kwargs,
+    ) -> str:
+        self.connect(port)
+        response = self._request_responses.get(probe_command, "")
+        if expected_response_fragment not in response:
+            self.disconnect()
+            raise SerialConnectionError(
+                f"{port} opened, but the device did not answer the controller probe. "
+                "It may be an unflashed ESP32. You can still flash firmware to this port."
+            )
+        return response
 
     def disconnect(self) -> None:
         self.disconnect_calls += 1
@@ -183,7 +200,7 @@ def test_main_window_reflows_header_cards_on_narrow_width(qtbot) -> None:
 
 
 def test_flash_success_reconnects_immediately(qtbot, monkeypatch) -> None:
-    serial_service = FakeSerialService()
+    serial_service = FakeSerialService(request_responses={"help": "Available commands:\n"})
     firmware_service = FakeFirmwareService()
     window = MainWindow(
         settings=AppSettings(),
@@ -227,6 +244,7 @@ def test_flash_without_controller_connection_reconnects_immediately(qtbot, monke
         port_name="COM7",
         connected=False,
         available_ports=[SerialPortInfo(device="COM7", description="USB Serial Device")],
+        request_responses={"help": "Available commands:\n"},
     )
     firmware_service = FakeFirmwareService()
     window = MainWindow(
@@ -265,6 +283,45 @@ def test_flash_without_controller_connection_reconnects_immediately(qtbot, monke
     assert serial_service.connect_calls == ["COM7"]
     assert serial_service.is_connected is True
     assert "Reconnected to COM7 after firmware flash" in window.controller_details_label.text()
+
+
+def test_connect_rejects_device_that_does_not_answer_like_controller(qtbot, monkeypatch) -> None:
+    serial_service = FakeSerialService(
+        port_name="COM7",
+        connected=False,
+        available_ports=[SerialPortInfo(device="COM7", description="USB Serial Device")],
+        request_responses={"help": ""},
+    )
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    critical_messages: list[tuple[str, str]] = []
+
+    def fake_critical(parent, title, text):
+        critical_messages.append((title, text))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+
+    window.toggle_connection()
+
+    assert serial_service.connect_calls == ["COM7"]
+    assert serial_service.disconnect_calls == 1
+    assert serial_service.is_connected is False
+    assert window.sections_group.isEnabled() is False
+    assert window.status_label.text() == "Ready to connect or flash on COM7"
+    assert "still flash firmware to this port" in window.controller_details_label.text()
+    assert critical_messages == [
+        (
+            "Connection failed",
+            "COM7 opened, but the device did not answer the controller probe. "
+            "It may be an unflashed ESP32. You can still flash firmware to this port.",
+        )
+    ]
 
 
 

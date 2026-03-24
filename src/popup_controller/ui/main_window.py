@@ -582,12 +582,19 @@ class MainWindow(QMainWindow):
         show_failure_dialog: bool = True,
     ) -> bool:
         self.controller_details_label.setText(
-            f"Connecting to {port}. Loading the live controller data now."
+            f"Connecting to {port}. Verifying that the device is running controller firmware."
         )
         self._begin_busy(f"Connecting to {port}...")
 
         try:
-            self.serial_service.connect(port)
+            probe_response = self.serial_service.connect_to_controller(
+                port,
+                probe_command=self.settings.controller_probe_command,
+                expected_response_fragment=self.settings.controller_probe_response_fragment,
+                warmup_seconds=self.settings.controller_probe_warmup_seconds,
+                probe_window_seconds=self.settings.controller_probe_window_seconds,
+                progress_callback=self._process_loading_events,
+            )
         except SerialConnectionError as exc:
             self._append_log(f"Connection to {port} failed: {exc}")
             self.controller_details_label.setText(f"Unable to connect to {port}. {exc}")
@@ -598,6 +605,12 @@ class MainWindow(QMainWindow):
             return False
 
         self._append_log(f"Connected to {port} at {self.serial_service.baudrate} baud.")
+        first_reply_line = next(
+            (line.strip() for line in probe_response.splitlines() if line.strip()),
+            "",
+        )
+        if first_reply_line:
+            self._append_log(f"Controller probe reply: {first_reply_line}")
         refresh_steps: tuple[tuple[str, Callable[[Callable[[], None] | None], None]], ...] = (
             ("Loading build info...", self._refresh_build_info),
             ("Loading controller state...", self._refresh_controller_state),
