@@ -59,7 +59,7 @@ try {
         throw "PyInstaller spec file not found at $specFile"
     }
 
-    $version = (& $pythonExe scripts\versioning.py current).Trim()
+    $version = (& $pythonExe scripts\build_version.py current).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)) {
         throw 'Unable to resolve the application version for packaging.'
     }

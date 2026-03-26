@@ -21,7 +21,6 @@ See [LICENSE](LICENSE) for the full license text and [THIRD_PARTY_NOTICES.md](TH
 - Send direct control commands and protected service commands
 - Flash ESP32 firmware bundles from `pop_up_controller_v10_firmware_v_x.x.x.zip`
 - Package a standalone Windows executable with PyInstaller and bundled `esptool`
-- Stamp every git commit with an incremented application version via a repo hook (This is just for some basic versioning)
 
 ## Development setup
 
@@ -31,18 +30,6 @@ py -3.14 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -e .[dev]
 ```
-
-## Git hook setup
-
-The repository ships a tracked pre-commit hook in `.githooks\pre-commit`.
-
-Install it for your local clone with:
-
-```powershell
-scripts\install_git_hooks.ps1
-```
-
-Each commit bumps the patch version in `src\popup_controller\__init__.py` and `pyproject.toml`, starting from `1.0.0`.
 
 ## Flash bundle format
 
@@ -79,6 +66,23 @@ To skip tests during a local packaging iteration:
 scripts\build_exe.ps1 -SkipTests
 ```
 
+## Automated release builds
+
+GitHub Actions now builds the release archive automatically when you publish a GitHub release.
+
+The release workflow:
+
+- reads the release tag such as `v1.0.13`
+- injects that version into `src\popup_controller\__init__.py` for the build
+- installs the project into a fresh `.venv`
+- runs the packaging script on a `windows-latest` runner
+- zips the `dist\` folder
+- uploads the zip back to the same GitHub release as an attachment
+
+This removes the old local version-bump flow and makes the GitHub release tag the source of truth for packaged builds.
+
+You can also test the release build manually from the Actions tab with the `Build Release Package` workflow and a tag input.
+
 ## Distribution note
 
 Binary distributions of this application should be shared together with the corresponding source code, or with a clear link to the public source repository, so the GPL obligations remain satisfied.
@@ -87,6 +91,7 @@ Binary distributions of this application should be shared together with the corr
 
 ```text
 .
+|-- .github/
 |-- .githooks/
 |-- docs/
 |-- firmware/

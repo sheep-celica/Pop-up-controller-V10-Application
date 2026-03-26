@@ -28,7 +28,8 @@ This repository contains the Windows desktop application for the Pop-up Controll
 - `src/popup_controller/assets/`: icons and bundled images used by the UI
 - `tests/`: unit and UI-oriented tests, generally mirroring services, dialogs, and main window behavior
 - `firmware/`: local firmware bundles that can be flashed or distributed with the packaged app
-- `scripts/`: helper scripts for packaging, git hooks, and version management
+- `.github/workflows/`: GitHub Actions automation for release packaging
+- `scripts/`: helper scripts for packaging, optional git-hook setup, and build-version injection
 - `docs/architecture.md`: short architecture overview
 - `popup-controller.spec`: PyInstaller build spec
 
@@ -49,7 +50,7 @@ This repository contains the Windows desktop application for the Pop-up Controll
 - Preserve the existing `src/` package layout.
 - Avoid moving protocol details into dialogs or window classes.
 - If you change packaging inputs, also review `popup-controller.spec`, `scripts/build_exe.ps1`, and any copied distribution assets.
-- If you change versioning or release behavior, also review `scripts/versioning.py`, the pre-commit hook setup, and the firmware release service/tests.
+- If you change versioning or release behavior, also review `scripts/build_version.py`, `.github/workflows/`, and the firmware release service/tests.
 - If you add new user-visible sections or dialogs, review `src/popup_controller/ui/sections.py`, related dialog classes, and layout tests.
 
 ## Common Commands
@@ -67,7 +68,6 @@ python -m pytest tests\test_main_window.py
 python -m ruff check .
 scripts\build_exe.ps1
 scripts\build_exe.ps1 -SkipTests
-scripts\install_git_hooks.ps1
 ```
 
 ## Testing Expectations
