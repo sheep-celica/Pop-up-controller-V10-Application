@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QMessageBox, QScrollArea
+from PySide6.QtWidgets import QMessageBox, QPushButton, QScrollArea
 
 from popup_controller.config import AppSettings
 from popup_controller.services.firmware_service import FlashResult
@@ -197,6 +197,64 @@ def test_main_window_reflows_header_cards_on_narrow_width(qtbot) -> None:
 
     assert max(column for _, column in positions) == 1
     assert max(row for row, _ in positions) >= 2
+
+
+def test_main_window_marks_nested_layout_wrappers_with_surface_roles(qtbot) -> None:
+    settings = AppSettings(auto_check_latest_firmware_on_startup=False)
+    window = MainWindow(
+        settings=settings,
+        serial_service=FakeSerialService(connected=False),
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    assert window.central_container.property("surfaceRole") == "window"
+    assert window.loading_slot.property("surfaceRole") == "transparent"
+    assert window.header_metrics_widget.property("surfaceRole") == "transparent"
+
+
+def test_main_window_uses_accented_form_labels_for_field_captions(qtbot) -> None:
+    settings = AppSettings(auto_check_latest_firmware_on_startup=False)
+    window = MainWindow(
+        settings=settings,
+        serial_service=FakeSerialService(connected=False),
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    assert window.port_label.objectName() == "formFieldLabel"
+    assert window.connection_status_label.objectName() == "formFieldLabel"
+    assert window.firmware_file_label.objectName() == "formFieldLabel"
+    assert window.github_release_label.objectName() == "formFieldLabel"
+
+
+def test_main_window_styles_latest_release_like_serial_status_and_removes_manual_check_button(qtbot) -> None:
+    settings = AppSettings(auto_check_latest_firmware_on_startup=False)
+    window = MainWindow(
+        settings=settings,
+        serial_service=FakeSerialService(connected=False),
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    assert window.latest_firmware_status_label.objectName() == "statusPill"
+    assert window.latest_firmware_status_label.wordWrap() is False
+    assert "Check latest" not in [
+        button.text() for button in window.firmware_group.findChildren(QPushButton) if button.text()
+    ]
+
+
+def test_main_window_matches_firmware_action_button_widths_and_flash_accent(qtbot) -> None:
+    settings = AppSettings(auto_check_latest_firmware_on_startup=False)
+    window = MainWindow(
+        settings=settings,
+        serial_service=FakeSerialService(connected=False),
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    assert window.flash_button.property("accent") is True
+    assert window.flash_button.minimumWidth() == window.download_latest_firmware_button.minimumWidth()
 
 
 def test_flash_success_reconnects_immediately(qtbot, monkeypatch) -> None:
@@ -438,8 +496,7 @@ def test_refresh_latest_firmware_updates_status_label(qtbot, tmp_path: Path) -> 
     window.refresh_latest_firmware()
 
     assert release_service.fetch_calls == 1
-    assert "v1.0.9" in window.latest_firmware_status_label.text()
-    assert "pop_up_controller_v10_firmware_v_1.0.9.zip" in window.latest_firmware_status_label.text()
+    assert window.latest_firmware_status_label.text() == "v1.0.9 - Published 2026-03-15"
 
 
 def test_download_latest_firmware_populates_flash_bundle_path(qtbot, tmp_path: Path) -> None:
@@ -491,7 +548,7 @@ def test_main_window_auto_checks_latest_firmware_on_first_show(qtbot, monkeypatc
     callback()
 
     assert release_service.fetch_calls == 1
-    assert "v1.0.9" in window.latest_firmware_status_label.text()
+    assert window.latest_firmware_status_label.text() == "v1.0.9 - Published 2026-03-15"
 
     window.showEvent(QShowEvent())
     assert release_service.fetch_calls == 1

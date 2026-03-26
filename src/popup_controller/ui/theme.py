@@ -38,6 +38,12 @@ def apply_dark_theme(app: QApplication) -> None:
         QDialog {
             background-color: #111318;
         }
+        QWidget[surfaceRole="window"] {
+            background-color: #111318;
+        }
+        QWidget[surfaceRole="transparent"] {
+            background: transparent;
+        }
         QFrame#headerCard {
             background-color: #1b2230;
             border: 1px solid #2d3748;
@@ -121,6 +127,15 @@ def apply_dark_theme(app: QApplication) -> None:
             font-size: 13px;
             font-weight: 700;
             background: transparent;
+        }
+        QLabel#formFieldLabel {
+            color: #f4f7fb;
+            font-size: 12px;
+            font-weight: 700;
+            background: transparent;
+            border: none;
+            border-left: 3px solid #3d6f9d;
+            padding: 2px 0 2px 8px;
         }
         QLabel#sectionNote {
             color: #9aabc0;

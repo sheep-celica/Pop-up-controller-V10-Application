@@ -28,7 +28,13 @@ from PySide6.QtWidgets import (
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
 from popup_controller.ui.remote_mapping_reference_dialog import RemoteMappingReferenceDialog
-from popup_controller.ui.window_helpers import apply_initial_window_size, create_fixed_loading_slot
+from popup_controller.ui.window_helpers import (
+    apply_initial_window_size,
+    create_form_field_label,
+    create_fixed_loading_slot,
+    set_transparent_surface,
+    set_window_surface,
+)
 from popup_controller.services.settings_service import (
     SettingsSnapshot,
     parse_battery_voltage_response,
@@ -151,13 +157,13 @@ class SettingsDialog(QDialog):
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
 
-        self.content_widget = QWidget(scroll_area)
+        self.content_widget = set_window_surface(QWidget(scroll_area))
         content_layout = QVBoxLayout(self.content_widget)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
 
         self.section_navigation_group = self._build_section_navigation_group()
-        self.section_stack = QStackedWidget(self.content_widget)
+        self.section_stack = set_window_surface(QStackedWidget(self.content_widget))
         self.sleepy_eye_group = self._build_sleepy_eye_group()
         self.remote_inputs_with_light_switch_group = self._build_remote_inputs_with_light_switch_group()
         self.safety_remote_inputs_with_light_switch_group = self._build_remote_inputs_with_light_switch_group(
@@ -231,7 +237,7 @@ class SettingsDialog(QDialog):
         return group
 
     def _create_settings_section_page(self, *groups: QGroupBox) -> QWidget:
-        page = QWidget(self.section_stack)
+        page = set_transparent_surface(QWidget(self.section_stack))
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
@@ -292,9 +298,9 @@ class SettingsDialog(QDialog):
         self.battery_update_button = QPushButton("Update constants", editor)
         self.read_voltage_button = QPushButton("Read voltage", editor)
 
-        editor_layout.addWidget(QLabel("New a", editor), 1, 0)
+        editor_layout.addWidget(create_form_field_label("New a", editor), 1, 0)
         editor_layout.addWidget(self.battery_a_input, 1, 1)
-        editor_layout.addWidget(QLabel("New b", editor), 1, 2)
+        editor_layout.addWidget(create_form_field_label("New b", editor), 1, 2)
         editor_layout.addWidget(self.battery_b_input, 1, 3)
         editor_layout.addWidget(self.battery_update_button, 2, 2)
         editor_layout.addWidget(self.read_voltage_button, 2, 3)
@@ -336,7 +342,7 @@ class SettingsDialog(QDialog):
         self.sleepy_eye_combo.addItems(["TRUE", "FALSE"])
         self.sleepy_eye_update_button = QPushButton("Update setting", editor)
 
-        editor_layout.addWidget(QLabel("New value", editor), 1, 0)
+        editor_layout.addWidget(create_form_field_label("New value", editor), 1, 0)
         editor_layout.addWidget(self.sleepy_eye_combo, 1, 1)
         editor_layout.addWidget(self.sleepy_eye_update_button, 1, 3)
 
@@ -385,7 +391,7 @@ class SettingsDialog(QDialog):
         setattr(self, button_attr, button)
         self.remote_inputs_with_headlights_combos.append(combo)
 
-        editor_layout.addWidget(QLabel("New value", editor), 1, 0)
+        editor_layout.addWidget(create_form_field_label("New value", editor), 1, 0)
         editor_layout.addWidget(combo, 1, 1)
         editor_layout.addWidget(button, 1, 3)
 
@@ -435,13 +441,13 @@ class SettingsDialog(QDialog):
         self.idle_seconds_spin.setRange(0, 59)
         self.idle_update_button = QPushButton("Update idle timeout", editor)
 
-        editor_layout.addWidget(QLabel("Days", editor), 1, 0)
+        editor_layout.addWidget(create_form_field_label("Days", editor), 1, 0)
         editor_layout.addWidget(self.idle_days_spin, 1, 1)
-        editor_layout.addWidget(QLabel("Hours", editor), 1, 2)
+        editor_layout.addWidget(create_form_field_label("Hours", editor), 1, 2)
         editor_layout.addWidget(self.idle_hours_spin, 1, 3)
-        editor_layout.addWidget(QLabel("Minutes", editor), 2, 0)
+        editor_layout.addWidget(create_form_field_label("Minutes", editor), 2, 0)
         editor_layout.addWidget(self.idle_minutes_spin, 2, 1)
-        editor_layout.addWidget(QLabel("Seconds", editor), 2, 2)
+        editor_layout.addWidget(create_form_field_label("Seconds", editor), 2, 2)
         editor_layout.addWidget(self.idle_seconds_spin, 2, 3)
         editor_layout.addWidget(self.idle_update_button, 3, 3)
 
@@ -481,7 +487,7 @@ class SettingsDialog(QDialog):
         self.min_state_spin.setRange(0, 600000)
         self.min_state_update_button = QPushButton("Update value", editor)
 
-        editor_layout.addWidget(QLabel("New milliseconds", editor), 1, 0)
+        editor_layout.addWidget(create_form_field_label("New milliseconds", editor), 1, 0)
         editor_layout.addWidget(self.min_state_spin, 1, 1)
         editor_layout.addWidget(self.min_state_update_button, 1, 3)
 
@@ -521,7 +527,7 @@ class SettingsDialog(QDialog):
         self.sensing_delay_spin.setRange(0, 1000000)
         self.sensing_delay_update_button = QPushButton("Update value", editor)
 
-        editor_layout.addWidget(QLabel("New microseconds", editor), 1, 0)
+        editor_layout.addWidget(create_form_field_label("New microseconds", editor), 1, 0)
         editor_layout.addWidget(self.sensing_delay_spin, 1, 1)
         editor_layout.addWidget(self.sensing_delay_update_button, 1, 3)
 
@@ -563,7 +569,7 @@ class SettingsDialog(QDialog):
         for index, (label_text, combo) in enumerate(zip(REMOTE_INPUT_LABELS, self.remote_input_combos), start=1):
             row = 1 + (index - 1) // 2
             column = ((index - 1) % 2) * 2
-            editor_layout.addWidget(QLabel(label_text, editor), row, column)
+            editor_layout.addWidget(create_form_field_label(label_text, editor, wrap=True, maximum_width=150), row, column)
             editor_layout.addWidget(combo, row, column + 1)
 
         editor_layout.addWidget(self.remote_mapping_reference_button, 3, 2)

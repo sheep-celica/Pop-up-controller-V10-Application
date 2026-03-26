@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox
 
 from popup_controller.config import AppSettings
 from popup_controller.ui import main_window as main_window_module
@@ -170,6 +170,25 @@ def test_settings_dialog_organizes_settings_into_clickable_sections(qtbot) -> No
     assert dialog.section_stack.currentWidget() is dialog.settings_section_pages["remote"]
     assert dialog.settings_section_buttons["remote"].property("accent") is True
     assert dialog.settings_section_buttons["safety"].property("accent") is False
+
+
+def test_settings_dialog_marks_scroll_content_with_surface_roles(qtbot) -> None:
+    dialog = SettingsDialog(serial_service=FakeSerialService())
+    qtbot.addWidget(dialog)
+
+    assert dialog.content_widget.property("surfaceRole") == "window"
+    assert dialog.section_stack.property("surfaceRole") == "window"
+    assert dialog.loading_slot.property("surfaceRole") == "transparent"
+    assert {page.property("surfaceRole") for page in dialog.settings_section_pages.values()} == {"transparent"}
+
+
+def test_settings_dialog_uses_accented_form_labels_for_editor_fields(qtbot) -> None:
+    dialog = SettingsDialog(serial_service=FakeSerialService())
+    qtbot.addWidget(dialog)
+
+    form_labels = dialog.findChildren(QLabel, "formFieldLabel")
+
+    assert len(form_labels) == 15
 
 
 def test_settings_dialog_syncs_remote_inputs_with_light_switch_between_sections(qtbot) -> None:

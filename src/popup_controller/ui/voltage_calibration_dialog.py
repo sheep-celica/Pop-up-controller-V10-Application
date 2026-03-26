@@ -25,7 +25,12 @@ from PySide6.QtWidgets import (
 
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
 from popup_controller.services.settings_service import parse_battery_voltage_response
-from popup_controller.ui.window_helpers import apply_initial_window_size, create_fixed_loading_slot, create_scrollable_dialog_layout
+from popup_controller.ui.window_helpers import (
+    apply_initial_window_size,
+    create_form_field_label,
+    create_fixed_loading_slot,
+    create_scrollable_dialog_layout,
+)
 from popup_controller.services.voltage_calibration_service import (
     VoltageCalibrationError,
     VoltageCalibrationResult,
@@ -117,7 +122,7 @@ class AddVoltageMeasurementDialog(QDialog):
         self.measured_voltage_input.setValidator(QDoubleValidator(0.0, 100.0, 6, self))
 
         layout.addWidget(note, 0, 0, 1, 2)
-        layout.addWidget(QLabel("Measured voltage (V)", card), 1, 0)
+        layout.addWidget(create_form_field_label("Measured voltage (V)", card), 1, 0)
         layout.addWidget(self.measured_voltage_input, 1, 1)
         return card
 
@@ -341,11 +346,11 @@ class VoltageCalibrationDialog(QDialog):
         self.save_button.clicked.connect(self.save_calibration)
 
         layout.addWidget(note, 0, 0, 1, 4)
-        layout.addWidget(QLabel("Calculated a", group), 1, 0)
+        layout.addWidget(create_form_field_label("Calculated a", group), 1, 0)
         layout.addWidget(self.calculated_a_value, 1, 1)
-        layout.addWidget(QLabel("Calculated b", group), 1, 2)
+        layout.addWidget(create_form_field_label("Calculated b", group), 1, 2)
         layout.addWidget(self.calculated_b_value, 1, 3)
-        layout.addWidget(QLabel("Fit summary", group), 2, 0)
+        layout.addWidget(create_form_field_label("Fit summary", group), 2, 0)
         layout.addWidget(self.fit_summary_value, 2, 1, 1, 3)
         layout.addWidget(self.save_button, 3, 3)
         return group

@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QGuiApplication, QScreen
-from PySide6.QtWidgets import QFrame, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 DEFAULT_WINDOW_WIDTH_RATIO = 0.72
 DEFAULT_WINDOW_HEIGHT_RATIO = 0.84
 DEFAULT_SCREEN_MARGIN_PX = 80
 DEFAULT_MAX_WINDOW_WIDTH = 1500
 DEFAULT_MAX_WINDOW_HEIGHT = 1200
+SURFACE_ROLE_PROPERTY = "surfaceRole"
+SURFACE_ROLE_TRANSPARENT = "transparent"
+SURFACE_ROLE_WINDOW = "window"
+FORM_FIELD_LABEL_OBJECT_NAME = "formFieldLabel"
 
 
 def calculate_initial_window_size(
@@ -82,7 +86,7 @@ def create_scrollable_dialog_layout(
     scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
-    content_widget = QWidget(scroll_area)
+    content_widget = set_window_surface(QWidget(scroll_area))
     content_layout = QVBoxLayout(content_widget)
     content_layout.setContentsMargins(0, 0, 0, 0)
     content_layout.setSpacing(spacing)
@@ -95,7 +99,7 @@ def create_scrollable_dialog_layout(
 
 
 def create_fixed_loading_slot(parent: QWidget, loading_frame: QFrame) -> QWidget:
-    slot = QWidget(parent)
+    slot = set_transparent_surface(QWidget(parent))
     slot_layout = QVBoxLayout(slot)
     slot_layout.setContentsMargins(0, 0, 0, 0)
     slot_layout.setSpacing(0)
@@ -108,6 +112,37 @@ def create_fixed_loading_slot(parent: QWidget, loading_frame: QFrame) -> QWidget
         + slot_margins.bottom()
     )
     return slot
+
+
+def set_surface_role(widget: QWidget, role: str) -> QWidget:
+    widget.setProperty(SURFACE_ROLE_PROPERTY, role)
+    widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    return widget
+
+
+def set_transparent_surface(widget: QWidget) -> QWidget:
+    return set_surface_role(widget, SURFACE_ROLE_TRANSPARENT)
+
+
+def set_window_surface(widget: QWidget) -> QWidget:
+    return set_surface_role(widget, SURFACE_ROLE_WINDOW)
+
+
+def create_form_field_label(
+    text: str,
+    parent: QWidget,
+    *,
+    wrap: bool = False,
+    maximum_width: int | None = None,
+) -> QLabel:
+    label = QLabel(text, parent)
+    label.setObjectName(FORM_FIELD_LABEL_OBJECT_NAME)
+    label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+    label.setWordWrap(wrap)
+    if maximum_width is not None:
+        label.setMaximumWidth(maximum_width)
+    return label
 
 
 

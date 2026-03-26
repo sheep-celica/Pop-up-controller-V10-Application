@@ -1,4 +1,6 @@
-from popup_controller.ui.window_helpers import calculate_initial_window_size
+from PySide6.QtWidgets import QWidget
+
+from popup_controller.ui.window_helpers import calculate_initial_window_size, create_form_field_label
 
 
 
@@ -15,3 +17,12 @@ def test_calculate_initial_window_size_stays_within_small_screen_limits() -> Non
 
     assert size.width() == 720
     assert size.height() == 520
+
+
+def test_create_form_field_label_uses_shared_object_name(qtbot) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+
+    label = create_form_field_label("COM port", parent)
+
+    assert label.objectName() == "formFieldLabel"

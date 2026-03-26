@@ -25,7 +25,13 @@ from PySide6.QtWidgets import (
 from popup_controller.manufacture_options import BOARD_REVISION_OPTIONS, CAR_MODEL_OPTIONS
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
 from popup_controller.ui.voltage_calibration_dialog import VoltageCalibrationDialog
-from popup_controller.ui.window_helpers import apply_initial_window_size, create_fixed_loading_slot, create_scrollable_dialog_layout
+from popup_controller.ui.window_helpers import (
+    apply_initial_window_size,
+    create_form_field_label,
+    create_fixed_loading_slot,
+    create_scrollable_dialog_layout,
+    set_transparent_surface,
+)
 
 
 SERVICE_ACCESS_PASSWORD = "SE-aeemc2"
@@ -117,7 +123,7 @@ class ServiceDialog(QDialog):
         self.clear_statistics_button.clicked.connect(self.clear_statistics)
 
         layout.addWidget(note, 0, 0, 1, 3)
-        layout.addWidget(QLabel("Controller password", group), 1, 0)
+        layout.addWidget(create_form_field_label("Controller password", group), 1, 0)
         layout.addWidget(self.clear_statistics_password_input, 1, 1)
         layout.addWidget(self.clear_statistics_button, 1, 2)
         return group
@@ -181,22 +187,22 @@ class ServiceDialog(QDialog):
         self.write_manufacture_button.clicked.connect(self.write_manufacture_data)
 
         layout.addWidget(note, 0, 0, 1, 4)
-        layout.addWidget(QLabel("Serial number", group), 1, 0)
+        layout.addWidget(create_form_field_label("Serial number", group), 1, 0)
         layout.addWidget(self.serial_number_input, 1, 1)
-        layout.addWidget(QLabel("Board serial", group), 1, 2)
+        layout.addWidget(create_form_field_label("Board serial", group), 1, 2)
         layout.addWidget(self.board_serial_input, 1, 3)
-        manufacture_date_row = QWidget(group)
+        manufacture_date_row = set_transparent_surface(QWidget(group))
         manufacture_date_row_layout = QHBoxLayout(manufacture_date_row)
         manufacture_date_row_layout.setContentsMargins(0, 0, 0, 0)
         manufacture_date_row_layout.setSpacing(8)
         manufacture_date_row_layout.addWidget(self.manufacture_date_input, stretch=1)
         manufacture_date_row_layout.addWidget(self.pick_manufacture_date_button)
 
-        layout.addWidget(QLabel("Board revision", group), 2, 0)
+        layout.addWidget(create_form_field_label("Board revision", group), 2, 0)
         layout.addWidget(self.board_revision_combo, 2, 1)
-        layout.addWidget(QLabel("Manufacture date", group), 2, 2)
+        layout.addWidget(create_form_field_label("Manufacture date", group), 2, 2)
         layout.addWidget(manufacture_date_row, 2, 3)
-        layout.addWidget(QLabel("Car model", group), 3, 0)
+        layout.addWidget(create_form_field_label("Car model", group), 3, 0)
         layout.addWidget(self.car_model_combo, 3, 1, 1, 3)
         layout.addWidget(self.write_manufacture_button, 4, 3)
         return group

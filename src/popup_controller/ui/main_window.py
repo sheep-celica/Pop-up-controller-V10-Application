@@ -46,6 +46,7 @@ from popup_controller.ui.section_dialog import SectionDialog
 from popup_controller.ui.settings_dialog import SettingsDialog
 from popup_controller.ui.sections import SECTION_DEFINITIONS, SectionDefinition
 from popup_controller.ui.statistics_dialog import StatisticsDialog
+from popup_controller.ui.window_helpers import create_form_field_label, set_transparent_surface, set_window_surface
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +108,7 @@ class MainWindow(QMainWindow):
             return
 
         self._startup_firmware_check_scheduled = True
-        self.latest_firmware_status_label.setText("Checking latest GitHub release...")
-        self.latest_firmware_status_label.setToolTip("")
+        self._set_latest_firmware_status("Checking GitHub...")
         QTimer.singleShot(0, self._auto_refresh_latest_firmware)
 
     def resizeEvent(self, event) -> None:
@@ -125,7 +125,7 @@ class MainWindow(QMainWindow):
         self._fetch_latest_firmware_release(show_error_dialog=False)
 
     def _build_ui(self) -> None:
-        self.central_container = QWidget(self)
+        self.central_container = set_window_surface(QWidget(self))
         container_layout = QVBoxLayout(self.central_container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
@@ -137,7 +137,7 @@ class MainWindow(QMainWindow):
         self.central_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.central_scroll_area.viewport().installEventFilter(self)
 
-        scroll_content = QWidget(self.central_scroll_area)
+        scroll_content = set_window_surface(QWidget(self.central_scroll_area))
         root_layout = QVBoxLayout(scroll_content)
         root_layout.setContentsMargins(18, 18, 18, 18)
         root_layout.setSpacing(14)
@@ -148,7 +148,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self._build_feedback_group(), stretch=1)
         self.central_scroll_area.setWidget(scroll_content)
 
-        self.loading_slot = QWidget(self.central_container)
+        self.loading_slot = set_transparent_surface(QWidget(self.central_container))
         loading_slot_layout = QVBoxLayout(self.loading_slot)
         loading_slot_layout.setContentsMargins(18, 0, 18, 10)
         loading_slot_layout.setSpacing(0)
@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
         self.controller_details_label.setWordWrap(True)
         self.controller_details_label.setMinimumWidth(0)
 
-        self.header_metrics_widget = QWidget(card)
+        self.header_metrics_widget = set_transparent_surface(QWidget(card))
         self.header_metrics_layout = QGridLayout(self.header_metrics_widget)
         self.header_metrics_layout.setContentsMargins(0, 0, 0, 0)
         self.header_metrics_layout.setHorizontalSpacing(12)
@@ -263,6 +263,7 @@ class MainWindow(QMainWindow):
         layout = QGridLayout(group)
         layout.setHorizontalSpacing(12)
         layout.setVerticalSpacing(10)
+        layout.setColumnStretch(1, 1)
 
         self.port_combo = QComboBox(group)
         self.find_controller_button = QPushButton("Find controller", group)
@@ -273,12 +274,14 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Disconnected", group)
         self.status_label.setObjectName("statusPill")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.port_label = create_form_field_label("COM port", group)
+        self.connection_status_label = create_form_field_label("Status", group)
 
-        layout.addWidget(QLabel("COM port", group), 0, 0)
+        layout.addWidget(self.port_label, 0, 0)
         layout.addWidget(self.port_combo, 0, 1)
         layout.addWidget(self.find_controller_button, 0, 2)
         layout.addWidget(self.connect_button, 0, 3)
-        layout.addWidget(QLabel("Status", group), 1, 0)
+        layout.addWidget(self.connection_status_label, 1, 0)
         layout.addWidget(self.status_label, 1, 1, 1, 2)
         layout.addWidget(self.reboot_button, 1, 3)
         return group
@@ -302,10 +305,13 @@ class MainWindow(QMainWindow):
     def _build_firmware_group(self) -> QGroupBox:
         self.firmware_group = QGroupBox("Firmware", self)
         layout = QFormLayout(self.firmware_group)
+        layout.setLabelAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        layout.setFormAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
-        row = QWidget(self.firmware_group)
+        row = set_transparent_surface(QWidget(self.firmware_group))
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
 
         self.firmware_path_input = QLineEdit(row)
         self.firmware_path_input.setPlaceholderText("Select a flash bundle .zip or flash_manifest.json")
@@ -314,30 +320,36 @@ class MainWindow(QMainWindow):
             self.firmware_path_input.setText(str(default_bundle_path))
         self.browse_firmware_button = QPushButton("Browse", row)
         self.flash_button = QPushButton("Flash firmware", row)
+        self.flash_button.setProperty("accent", True)
+        self.firmware_file_label = create_form_field_label("Firmware file", self.firmware_group)
 
         row_layout.addWidget(self.firmware_path_input, stretch=1)
         row_layout.addWidget(self.browse_firmware_button)
         row_layout.addWidget(self.flash_button)
 
-        layout.addRow("Firmware file", row)
+        layout.addRow(self.firmware_file_label, row)
 
-        latest_row = QWidget(self.firmware_group)
+        latest_row = set_transparent_surface(QWidget(self.firmware_group))
         latest_row_layout = QHBoxLayout(latest_row)
         latest_row_layout.setContentsMargins(0, 0, 0, 0)
         latest_row_layout.setSpacing(8)
 
-        self.latest_firmware_status_label = QLabel("Not checked yet.", latest_row)
+        status_text = self._initial_latest_firmware_status()
+
+        self.latest_firmware_status_label = QLabel(status_text, latest_row)
+        self.latest_firmware_status_label.setObjectName("statusPill")
+        self.latest_firmware_status_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self.latest_firmware_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.latest_firmware_status_label.setWordWrap(True)
+        self.latest_firmware_status_label.setWordWrap(False)
         self.latest_firmware_status_label.setMinimumWidth(0)
-        self.check_latest_firmware_button = QPushButton("Check latest", latest_row)
         self.download_latest_firmware_button = QPushButton("Download latest", latest_row)
+        self.github_release_label = create_form_field_label("GitHub release", self.firmware_group)
+        self._match_button_widths(self.flash_button, self.download_latest_firmware_button)
 
         latest_row_layout.addWidget(self.latest_firmware_status_label, stretch=1)
-        latest_row_layout.addWidget(self.check_latest_firmware_button)
-        latest_row_layout.addWidget(self.download_latest_firmware_button)
+        latest_row_layout.addWidget(self.download_latest_firmware_button, 0, Qt.AlignmentFlag.AlignTop)
 
-        layout.addRow("GitHub release", latest_row)
+        layout.addRow(self.github_release_label, latest_row)
         return self.firmware_group
 
     def _build_feedback_group(self) -> QGroupBox:
@@ -354,13 +366,23 @@ class MainWindow(QMainWindow):
         self.reboot_button.clicked.connect(self.reboot_controller)
         self.browse_firmware_button.clicked.connect(self.browse_firmware)
         self.flash_button.clicked.connect(self.flash_firmware)
-        self.check_latest_firmware_button.clicked.connect(self.refresh_latest_firmware)
         self.download_latest_firmware_button.clicked.connect(self.download_latest_firmware)
 
         for section in SECTION_DEFINITIONS:
             self.section_buttons[section.section_id].clicked.connect(
                 lambda checked=False, current_section=section: self.open_section_dialog(current_section)
             )
+
+    def _match_button_widths(self, *buttons: QPushButton) -> None:
+        if not buttons:
+            return
+
+        for button in buttons:
+            button.ensurePolished()
+
+        uniform_width = max(button.sizeHint().width() for button in buttons)
+        for button in buttons:
+            button.setMinimumWidth(uniform_width)
 
     def _update_responsive_layouts(self) -> None:
         self._update_header_info_card_layout()
@@ -845,8 +867,7 @@ class MainWindow(QMainWindow):
         try:
             release = self.firmware_release_service.fetch_latest_release()
         except FirmwareReleaseError as exc:
-            self.latest_firmware_status_label.setText("Latest GitHub release unavailable.")
-            self.latest_firmware_status_label.setToolTip(str(exc))
+            self._set_latest_firmware_status("GitHub release unavailable.", tooltip=str(exc))
             self._append_log(f"GitHub firmware lookup failed: {exc}")
             self.statusBar().showMessage("GitHub firmware lookup failed.")
             if show_error_dialog:
@@ -856,17 +877,26 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
 
         self._latest_firmware_release = release
-        self.latest_firmware_status_label.setText(self._describe_latest_firmware_release(release))
-        self.latest_firmware_status_label.setToolTip(
-            "\n".join(
+        self._set_latest_firmware_status(
+            self._describe_latest_firmware_release(release),
+            tooltip="\n".join(
                 line
                 for line in (release.release_name or None, release.html_url, release.download_url)
                 if line
-            )
+            ),
         )
         self._append_log(f"Latest GitHub firmware: {self._release_version_text(release)} ({release.asset_name}).")
         self.statusBar().showMessage(f"Latest GitHub firmware: {self._release_version_text(release)}")
         return release
+
+    def _initial_latest_firmware_status(self) -> str:
+        if self.settings.auto_check_latest_firmware_on_startup:
+            return "Checks GitHub on startup."
+        return "Not checked yet."
+
+    def _set_latest_firmware_status(self, status_text: str, *, tooltip: str = "") -> None:
+        self.latest_firmware_status_label.setText(status_text)
+        self.latest_firmware_status_label.setToolTip(tooltip)
 
     def download_latest_firmware(self) -> None:
         release = self._latest_firmware_release or self._fetch_latest_firmware_release(show_error_dialog=True)
@@ -902,14 +932,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"{action_text} {version_text} from GitHub.")
 
     def _describe_latest_firmware_release(self, release: FirmwareReleaseInfo) -> str:
-        published_date = ""
         if release.published_at:
             published_date = release.published_at.split("T", 1)[0]
-
-        description = f"{self._release_version_text(release)} - {release.asset_name}"
-        if published_date:
-            description = f"{description} ({published_date})"
-        return description
+            return f"{self._release_version_text(release)} - Published {published_date}"
+        return self._release_version_text(release)
 
     def _release_version_text(self, release: FirmwareReleaseInfo) -> str:
         if release.version:

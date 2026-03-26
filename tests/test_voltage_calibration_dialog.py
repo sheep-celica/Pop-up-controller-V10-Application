@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 from PySide6.QtCore import QDate
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox
 
 from popup_controller.manufacture_options import BOARD_REVISION_OPTIONS, CAR_MODEL_OPTIONS
 from popup_controller.services.voltage_calibration_service import VoltageMeasurementPoint
@@ -83,6 +83,14 @@ def test_service_dialog_defaults_manufacture_date_to_today(qtbot) -> None:
     assert dialog.manufacture_date_input.text() == QDate.currentDate().toString("yyyy-MM-dd")
     assert dialog.manufacture_date_input.isReadOnly() is True
     assert dialog.pick_manufacture_date_button.text() == "Pick date"
+
+
+def test_service_dialog_uses_accented_form_labels_for_fields(qtbot) -> None:
+    serial_service = FakeSerialService()
+    dialog = ServiceDialog(serial_service)
+    qtbot.addWidget(dialog)
+
+    assert len(dialog.findChildren(QLabel, "formFieldLabel")) == 6
 
 
 def test_service_dialog_uses_configured_dropdowns_for_revision_and_car_model(qtbot) -> None:
@@ -184,3 +192,11 @@ def test_service_dialog_opens_voltage_calibration_dialog(qtbot, monkeypatch) -> 
     dialog.open_voltage_calibration_dialog()
 
     assert opened["value"] is True
+
+
+def test_voltage_calibration_dialog_uses_accented_form_labels_for_results(qtbot) -> None:
+    serial_service = FakeSerialService()
+    dialog = VoltageCalibrationDialog(serial_service)
+    qtbot.addWidget(dialog)
+
+    assert len(dialog.findChildren(QLabel, "formFieldLabel")) == 3
