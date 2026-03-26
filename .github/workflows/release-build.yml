@@ -49,13 +49,13 @@ jobs:
           "archive_name=$archiveName" >> $env:GITHUB_OUTPUT
 
       - name: Check out tagged source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ steps.release_info.outputs.tag }}
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.14"
           architecture: "x64"
