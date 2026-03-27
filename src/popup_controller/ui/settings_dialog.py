@@ -340,6 +340,10 @@ class SettingsDialog(QDialog):
 
         self.sleepy_eye_combo = QComboBox(editor)
         self.sleepy_eye_combo.addItems(["TRUE", "FALSE"])
+        self.sleepy_eye_combo.currentTextChanged.connect(
+            lambda value, current_combo=self.sleepy_eye_combo: self._update_boolean_combo_semantics(current_combo, value)
+        )
+        self._update_boolean_combo_semantics(self.sleepy_eye_combo, self.sleepy_eye_combo.currentText())
         self.sleepy_eye_update_button = QPushButton("Update setting", editor)
 
         editor_layout.addWidget(create_form_field_label("New value", editor), 1, 0)
@@ -386,6 +390,10 @@ class SettingsDialog(QDialog):
         combo = QComboBox(editor)
         combo.addItems(["TRUE", "FALSE"])
         combo.currentTextChanged.connect(self._sync_remote_inputs_with_headlights_combos)
+        combo.currentTextChanged.connect(
+            lambda value, current_combo=combo: self._update_boolean_combo_semantics(current_combo, value)
+        )
+        self._update_boolean_combo_semantics(combo, combo.currentText())
         button = QPushButton("Update setting", editor)
         setattr(self, combo_attr, combo)
         setattr(self, button_attr, button)
@@ -633,6 +641,7 @@ class SettingsDialog(QDialog):
 
         setattr(self, f"{key}_value", value_label)
         setattr(self, f"{key}_suffix", suffix_label)
+        setattr(self, f"{key}_card", card)
 
         layout.addWidget(caption_label)
         layout.addWidget(value_label)
@@ -684,6 +693,7 @@ class SettingsDialog(QDialog):
             signals_were_blocked = combo.blockSignals(True)
             combo.setCurrentText(value)
             combo.blockSignals(signals_were_blocked)
+            self._update_boolean_combo_semantics(combo, value)
 
     def load_settings(self, busy_message: str = "Loading controller settings...") -> None:
         if not self.serial_service.is_connected:
@@ -762,6 +772,7 @@ class SettingsDialog(QDialog):
             "sleepy_eye",
             self._format_bool(snapshot.allow_sleepy_eye_with_headlights),
             "controller flag",
+            semantic_state=self._bool_semantic_state(snapshot.allow_sleepy_eye_with_headlights),
         )
         if snapshot.allow_sleepy_eye_with_headlights is not None:
             self.sleepy_eye_combo.setCurrentText("TRUE" if snapshot.allow_sleepy_eye_with_headlights else "FALSE")
@@ -772,11 +783,13 @@ class SettingsDialog(QDialog):
             "remote_inputs_with_headlights",
             remote_inputs_with_headlights_value,
             remote_inputs_with_headlights_suffix,
+            semantic_state=self._bool_semantic_state(snapshot.allow_remote_inputs_with_headlights),
         )
         self._set_metric_card(
             "safety_remote_inputs_with_headlights",
             remote_inputs_with_headlights_value,
             remote_inputs_with_headlights_suffix,
+            semantic_state=self._bool_semantic_state(snapshot.allow_remote_inputs_with_headlights),
         )
         if snapshot.allow_remote_inputs_with_headlights is not None:
             self._sync_remote_inputs_with_headlights_combos(
@@ -821,8 +834,12 @@ class SettingsDialog(QDialog):
         self.rh_timing_text.setPlainText(snapshot.rh_timing.display_text)
         self.lh_timing_text.setPlainText(snapshot.lh_timing.display_text)
 
-    def _set_metric_card(self, key: str, value: str, suffix: str) -> None:
-        getattr(self, f"{key}_value").setText(value)
+    def _set_metric_card(self, key: str, value: str, suffix: str, semantic_state: str | None = None) -> None:
+        card = getattr(self, f"{key}_card")
+        value_label = getattr(self, f"{key}_value")
+        value_label.setText(value)
+        self._set_semantic_state(card, semantic_state)
+        self._set_semantic_state(value_label, semantic_state)
         getattr(self, f"{key}_suffix").setText(suffix)
 
     def _build_status_message(self, snapshot: SettingsSnapshot) -> str:
@@ -1045,6 +1062,33 @@ class SettingsDialog(QDialog):
         if value is None:
             return "Unavailable"
         return "TRUE" if value else "FALSE"
+
+    def _bool_semantic_state(self, value: bool | None) -> str:
+        if value is None:
+            return "caution"
+        return "good" if value else "danger"
+
+    def _update_boolean_combo_semantics(self, combo: QComboBox, value: str) -> None:
+        normalized = value.strip().upper()
+        semantic_state: str | None
+        if normalized == "TRUE":
+            semantic_state = "good"
+        elif normalized == "FALSE":
+            semantic_state = "danger"
+        elif normalized == "UNAVAILABLE":
+            semantic_state = "caution"
+        else:
+            semantic_state = None
+        self._set_semantic_state(combo, semantic_state)
+
+    def _set_semantic_state(self, widget: QWidget, semantic_state: str | None) -> None:
+        if widget.property("semanticState") == semantic_state:
+            return
+
+        widget.setProperty("semanticState", semantic_state)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        widget.update()
 
     def _set_busy(self, busy: bool, message: str = "") -> None:
         if message:

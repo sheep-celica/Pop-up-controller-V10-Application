@@ -31,6 +31,7 @@ This repository contains the Windows desktop application for the Pop-up Controll
 - `.github/workflows/`: GitHub Actions automation for release packaging
 - `scripts/`: helper scripts for packaging, optional git-hook setup, and build-version injection
 - `docs/architecture.md`: short architecture overview
+- `docs/semantic-coloring.md`: semantic red/yellow/green UI behavior rules and current mappings
 - `popup-controller.spec`: PyInstaller build spec
 
 ## Architecture Notes
@@ -42,6 +43,7 @@ This repository contains the Windows desktop application for the Pop-up Controll
 - When adding a new controller-facing feature, update the relevant UI surface and add or extend tests in `tests/`.
 - Be careful with file paths and runtime behavior in `config.py`; this app supports both source execution and frozen PyInstaller builds.
 - Firmware release behavior currently targets GitHub releases from the Pop-up Controller V10 firmware repository.
+- UI semantic color behavior is documented in `docs/semantic-coloring.md`; keep detailed color rules there rather than in this file.
 
 ## Working In This Repo
 

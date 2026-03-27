@@ -22,6 +22,12 @@ See [LICENSE](LICENSE) for the full license text and [THIRD_PARTY_NOTICES.md](TH
 - Flash ESP32 firmware bundles from `pop_up_controller_v10_firmware_v_x.x.x.zip`
 - Package a standalone Windows executable with PyInstaller and bundled `esptool`
 
+## Further documentation
+
+- [Documentation Index](docs/README.md)
+- [Architecture Notes](docs/architecture.md)
+- [Semantic Coloring Rules](docs/semantic-coloring.md)
+
 ## Development setup
 
 ```powershell

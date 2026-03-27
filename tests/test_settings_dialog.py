@@ -198,10 +198,14 @@ def test_settings_dialog_syncs_remote_inputs_with_light_switch_between_sections(
     dialog.remote_inputs_with_headlights_combo.setCurrentText("FALSE")
 
     assert dialog.safety_remote_inputs_with_headlights_combo.currentText() == "FALSE"
+    assert dialog.remote_inputs_with_headlights_combo.property("semanticState") == "danger"
+    assert dialog.safety_remote_inputs_with_headlights_combo.property("semanticState") == "danger"
 
     dialog.safety_remote_inputs_with_headlights_combo.setCurrentText("TRUE")
 
     assert dialog.remote_inputs_with_headlights_combo.currentText() == "TRUE"
+    assert dialog.remote_inputs_with_headlights_combo.property("semanticState") == "good"
+    assert dialog.safety_remote_inputs_with_headlights_combo.property("semanticState") == "good"
 
 
 def test_settings_dialog_loads_sensing_delay_setting(qtbot) -> None:
@@ -224,10 +228,19 @@ def test_settings_dialog_loads_sensing_delay_setting(qtbot) -> None:
     assert "printRemoteInputsWithHeadlights" in serial_service.request_calls
     assert dialog.sensing_delay_value.text() == "1,000 us"
     assert dialog.sensing_delay_spin.value() == 1000
+    assert dialog.sleepy_eye_card.property("semanticState") == "good"
+    assert dialog.sleepy_eye_value.property("semanticState") == "good"
+    assert dialog.sleepy_eye_combo.property("semanticState") == "good"
     assert dialog.remote_inputs_with_headlights_value.text() == "FALSE"
     assert dialog.safety_remote_inputs_with_headlights_value.text() == "FALSE"
+    assert dialog.remote_inputs_with_headlights_card.property("semanticState") == "danger"
+    assert dialog.safety_remote_inputs_with_headlights_card.property("semanticState") == "danger"
+    assert dialog.remote_inputs_with_headlights_value.property("semanticState") == "danger"
+    assert dialog.safety_remote_inputs_with_headlights_value.property("semanticState") == "danger"
     assert dialog.remote_inputs_with_headlights_combo.currentText() == "FALSE"
     assert dialog.safety_remote_inputs_with_headlights_combo.currentText() == "FALSE"
+    assert dialog.remote_inputs_with_headlights_combo.property("semanticState") == "danger"
+    assert dialog.safety_remote_inputs_with_headlights_combo.property("semanticState") == "danger"
 
 
 def test_settings_dialog_updates_sensing_delay_with_expected_command(qtbot, monkeypatch) -> None:

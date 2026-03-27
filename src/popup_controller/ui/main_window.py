@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import logging
 from pathlib import Path
+import re
 import threading
 
 from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer
@@ -53,6 +54,9 @@ logger = logging.getLogger(__name__)
 HEADER_INFO_CARD_LAYOUT_BREAKPOINT_WIDE = 1280
 HEADER_INFO_CARD_LAYOUT_BREAKPOINT_MEDIUM = 860
 SECTION_BUTTON_LAYOUT_BREAKPOINT = 900
+_SEMVER_COMPONENT_RE = re.compile(r"\d+")
+_TEMPERATURE_MIN_OK_C = -20.0
+_TEMPERATURE_MAX_OK_C = 40.0
 
 
 class MainWindow(QMainWindow):
@@ -81,6 +85,16 @@ class MainWindow(QMainWindow):
         self.section_button_order: list[str] = []
         self.section_buttons: dict[str, QPushButton] = {}
         self._controller_operating_state: str | None = None
+        self._current_firmware_version: str | None = None
+        self._current_build_date: str | None = None
+        self._current_external_expander_state: str | None = None
+        self._current_temperature_c: float | None = None
+        self._build_info_has_live_data = False
+        self._startup_firmware_fetch_thread: threading.Thread | None = None
+        self._startup_firmware_fetch_result: dict[str, object] | None = None
+        self._startup_firmware_fetch_poll_timer = QTimer(self)
+        self._startup_firmware_fetch_poll_timer.setInterval(75)
+        self._startup_firmware_fetch_poll_timer.timeout.connect(self._check_startup_firmware_fetch)
         self.setWindowTitle(settings.app_display_name)
         if settings.icon_path.is_file():
             self.setWindowIcon(QIcon(str(settings.icon_path)))
@@ -109,7 +123,7 @@ class MainWindow(QMainWindow):
 
         self._startup_firmware_check_scheduled = True
         self._set_latest_firmware_status("Checking GitHub...")
-        QTimer.singleShot(0, self._auto_refresh_latest_firmware)
+        QTimer.singleShot(0, self._start_startup_firmware_fetch)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -121,8 +135,48 @@ class MainWindow(QMainWindow):
                 return True
         return super().eventFilter(watched, event)
 
-    def _auto_refresh_latest_firmware(self) -> None:
-        self._fetch_latest_firmware_release(show_error_dialog=False)
+    def _start_startup_firmware_fetch(self) -> None:
+        if self._startup_firmware_fetch_thread is not None and self._startup_firmware_fetch_thread.is_alive():
+            return
+
+        self._startup_firmware_fetch_result = {"done": False}
+
+        def runner() -> None:
+            try:
+                release = self.firmware_release_service.fetch_latest_release()
+                self._startup_firmware_fetch_result = {
+                    "done": True,
+                    "release": release,
+                }
+            except FirmwareReleaseError as exc:
+                self._startup_firmware_fetch_result = {
+                    "done": True,
+                    "error": exc,
+                }
+
+        self._startup_firmware_fetch_thread = threading.Thread(target=runner, daemon=True)
+        self._startup_firmware_fetch_thread.start()
+        self._startup_firmware_fetch_poll_timer.start()
+
+    def _check_startup_firmware_fetch(self) -> None:
+        if not self._startup_firmware_fetch_result or not self._startup_firmware_fetch_result.get("done"):
+            return
+
+        self._startup_firmware_fetch_poll_timer.stop()
+        result = self._startup_firmware_fetch_result
+        self._startup_firmware_fetch_thread = None
+        self._startup_firmware_fetch_result = None
+
+        error = result.get("error")
+        if isinstance(error, FirmwareReleaseError):
+            self._set_latest_firmware_status("GitHub release unavailable.", tooltip=str(error))
+            self._append_log(f"GitHub firmware lookup failed: {error}")
+            self.statusBar().showMessage("GitHub firmware lookup failed.")
+            return
+
+        release = result.get("release")
+        if isinstance(release, FirmwareReleaseInfo):
+            self._apply_latest_firmware_release(release)
 
     def _build_ui(self) -> None:
         self.central_container = set_window_surface(QWidget(self))
@@ -204,7 +258,7 @@ class MainWindow(QMainWindow):
             self._create_header_info_card("FW version", "--", "firmware_version"),
             self._create_header_info_card("Build date", "--", "build_date"),
             self._create_header_info_card("Controller state", "--", "controller_state"),
-            self._create_header_info_card("External expander", "--", "external_expander"),
+            self._create_header_info_card("Remote expansion module", "--", "external_expander"),
             self._create_header_info_card("Temperature", "--", "temperature"),
         ]
 
@@ -252,11 +306,122 @@ class MainWindow(QMainWindow):
         value_label.setWordWrap(True)
 
         setattr(self, f"{key}_value", value_label)
+        setattr(self, f"{key}_card", card)
 
         layout.addWidget(caption_label)
-        layout.addWidget(value_label)
+        if key == "firmware_version":
+            value_row = set_transparent_surface(QWidget(card))
+            value_row_layout = QHBoxLayout(value_row)
+            value_row_layout.setContentsMargins(0, 0, 0, 0)
+            value_row_layout.setSpacing(8)
+
+            self.firmware_update_indicator = QLabel("!", value_row)
+            self.firmware_update_indicator.setObjectName("updateIndicator")
+            self.firmware_update_indicator.setToolTip("A newer version is available.")
+            self.firmware_update_indicator.setVisible(False)
+
+            value_row_layout.addWidget(value_label)
+            value_row_layout.addWidget(self.firmware_update_indicator, 0, Qt.AlignmentFlag.AlignTop)
+            value_row_layout.addStretch(1)
+            layout.addWidget(value_row)
+        else:
+            layout.addWidget(value_label)
         layout.addStretch(1)
         return card
+
+    def _set_header_card_semantic_state(self, key: str, semantic_state: str | None) -> None:
+        card = getattr(self, f"{key}_card")
+        value_label = getattr(self, f"{key}_value")
+        self._set_semantic_state(card, semantic_state)
+        self._set_semantic_state(value_label, semantic_state)
+
+    def _set_semantic_state(self, widget: QWidget, semantic_state: str | None) -> None:
+        if widget.property("semanticState") == semantic_state:
+            return
+
+        widget.setProperty("semanticState", semantic_state)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        widget.update()
+
+    def _parse_version_components(self, version_text: str | None) -> tuple[int, ...] | None:
+        if not version_text:
+            return None
+
+        parts = tuple(int(part) for part in _SEMVER_COMPONENT_RE.findall(version_text))
+        if not parts:
+            return None
+        return parts
+
+    def _firmware_is_outdated(self) -> bool:
+        current_version = self._parse_version_components(self._current_firmware_version)
+        latest_version = self._parse_version_components(self._latest_firmware_release.version if self._latest_firmware_release else None)
+        if current_version is None or latest_version is None:
+            return False
+        return current_version < latest_version
+
+    def _update_build_info_semantics(self) -> None:
+        if not self._build_info_has_live_data:
+            self._set_header_card_semantic_state("firmware_version", None)
+            self._set_header_card_semantic_state("build_date", None)
+            self.firmware_update_indicator.setVisible(False)
+            return
+
+        if not self._current_firmware_version or not self._current_build_date:
+            self._set_header_card_semantic_state("firmware_version", "danger")
+            self._set_header_card_semantic_state("build_date", "danger")
+            self.firmware_update_indicator.setVisible(False)
+            return
+
+        semantic_state = "caution" if self._firmware_is_outdated() else "good"
+        self._set_header_card_semantic_state("firmware_version", semantic_state)
+        self._set_header_card_semantic_state("build_date", semantic_state)
+        self.firmware_update_indicator.setVisible(semantic_state == "caution")
+        self._set_semantic_state(self.firmware_update_indicator, semantic_state if semantic_state == "caution" else None)
+
+    def _apply_latest_firmware_release(self, release: FirmwareReleaseInfo) -> None:
+        self._latest_firmware_release = release
+        self._set_latest_firmware_status(
+            self._describe_latest_firmware_release(release),
+            tooltip="\n".join(
+                line
+                for line in (release.release_name or None, release.html_url, release.download_url)
+                if line
+            ),
+        )
+        self._append_log(f"Latest GitHub firmware: {self._release_version_text(release)} ({release.asset_name}).")
+        self.statusBar().showMessage(f"Latest GitHub firmware: {self._release_version_text(release)}")
+        self._update_build_info_semantics()
+
+    def _update_controller_state_semantics(self) -> None:
+        if self._controller_operating_state is None:
+            self._set_header_card_semantic_state("controller_state", "danger")
+            return
+        if self._controller_operating_state == "BENCH MODE":
+            self._set_header_card_semantic_state("controller_state", "caution")
+            return
+        self._set_header_card_semantic_state("controller_state", "good")
+
+    def _update_external_expander_semantics(self) -> None:
+        if self._current_external_expander_state is None:
+            self._set_header_card_semantic_state("external_expander", "danger")
+            return
+
+        normalized = self._current_external_expander_state.strip().casefold()
+        if normalized in {"not connected", "disconnected"}:
+            self._set_header_card_semantic_state("external_expander", "danger")
+            return
+        self._set_header_card_semantic_state("external_expander", "good")
+
+    def _update_temperature_semantics(self) -> None:
+        if self._current_temperature_c is None:
+            self._set_header_card_semantic_state("temperature", "danger")
+            return
+
+        if self._current_temperature_c < _TEMPERATURE_MIN_OK_C or self._current_temperature_c > _TEMPERATURE_MAX_OK_C:
+            self._set_header_card_semantic_state("temperature", "danger")
+            return
+        self._set_header_card_semantic_state("temperature", "good")
 
     def _build_connection_group(self) -> QGroupBox:
         group = QGroupBox("Serial connection", self)
@@ -357,7 +522,28 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(self.feedback_group)
         self.feedback_log = QPlainTextEdit(self.feedback_group)
         self.feedback_log.setReadOnly(True)
-        layout.addWidget(self.feedback_log)
+        layout.addWidget(self.feedback_log, stretch=1)
+
+        self.manual_command_row = set_transparent_surface(QWidget(self.feedback_group))
+        command_layout = QHBoxLayout(self.manual_command_row)
+        command_layout.setContentsMargins(0, 0, 0, 0)
+        command_layout.setSpacing(8)
+
+        self.manual_command_input = QLineEdit(self.manual_command_row)
+        self.manual_command_input.setPlaceholderText("Send a controller command manually")
+        self.manual_command_input.setClearButtonEnabled(True)
+        self.manual_command_input.setToolTip(
+            "Send any controller command and append its reply to the activity log."
+        )
+
+        self.manual_command_button = QPushButton("Send command", self.manual_command_row)
+        self.manual_command_button.setToolTip(
+            "Send the text above to the connected controller and log the response."
+        )
+
+        command_layout.addWidget(self.manual_command_input, stretch=1)
+        command_layout.addWidget(self.manual_command_button)
+        layout.addWidget(self.manual_command_row)
         return self.feedback_group
 
     def _connect_signals(self) -> None:
@@ -367,6 +553,9 @@ class MainWindow(QMainWindow):
         self.browse_firmware_button.clicked.connect(self.browse_firmware)
         self.flash_button.clicked.connect(self.flash_firmware)
         self.download_latest_firmware_button.clicked.connect(self.download_latest_firmware)
+        self.manual_command_button.clicked.connect(self.send_manual_command)
+        self.manual_command_input.returnPressed.connect(self.send_manual_command)
+        self.manual_command_input.textChanged.connect(lambda _text: self._update_connection_state())
 
         for section in SECTION_DEFINITIONS:
             self.section_buttons[section.section_id].clicked.connect(
@@ -704,6 +893,51 @@ class MainWindow(QMainWindow):
         )
         self._update_connection_state()
 
+    def send_manual_command(self) -> None:
+        command = self.manual_command_input.text().strip()
+        if not command:
+            self.manual_command_input.setFocus()
+            return
+
+        if not self.serial_service.is_connected:
+            QMessageBox.information(
+                self,
+                "Connect first",
+                "Connect to the controller before sending manual commands.",
+            )
+            return
+
+        self._append_log(f"TX > {command}")
+        poll_was_active = self._poll_timer.isActive()
+        if poll_was_active:
+            self._poll_timer.stop()
+
+        self._begin_busy(f"Sending '{command}'...")
+        try:
+            response = self.serial_service.request_text(
+                command,
+                idle_timeout_seconds=0.35,
+                max_duration_seconds=2.0,
+                progress_callback=self._process_loading_events,
+            )
+        except SerialConnectionError as exc:
+            self._append_log(f"Manual command failed: {exc}")
+            QMessageBox.warning(self, "Manual command", str(exc))
+            return
+        finally:
+            self._end_busy()
+            if poll_was_active and self.serial_service.is_connected:
+                self._poll_timer.start()
+
+        response_lines = [line.strip() for line in response.splitlines() if line.strip()]
+        if response_lines:
+            for line in response_lines:
+                self._append_log(f"RX < {line}")
+        else:
+            self._append_log("RX < (no response)")
+
+        self.manual_command_input.clear()
+
     def _request_service_access(self) -> bool:
         password, accepted = QInputDialog.getText(
             self,
@@ -734,10 +968,14 @@ class MainWindow(QMainWindow):
             )
         except SerialConnectionError as exc:
             self._clear_build_info()
+            self._build_info_has_live_data = True
+            self._set_header_card_semantic_state("firmware_version", "danger")
+            self._set_header_card_semantic_state("build_date", "danger")
             self._append_log(f"Build info read failed: {exc}")
             return
 
         snapshot = parse_build_info_snapshot(raw_response)
+        self._build_info_has_live_data = True
         firmware_version = snapshot.firmware_version or "Unavailable"
         build_date = snapshot.build_date or "Unavailable"
 
@@ -745,6 +983,9 @@ class MainWindow(QMainWindow):
         self.build_date_value.setText(build_date)
         self.firmware_version_value.setToolTip(snapshot.firmware_version or "")
         self.build_date_value.setToolTip(snapshot.build_timestamp or "")
+        self._current_firmware_version = snapshot.firmware_version
+        self._current_build_date = snapshot.build_date
+        self._update_build_info_semantics()
 
         if snapshot.firmware_version or snapshot.build_timestamp:
             self._append_log(
@@ -758,6 +999,12 @@ class MainWindow(QMainWindow):
         self.build_date_value.setText("--")
         self.firmware_version_value.setToolTip("")
         self.build_date_value.setToolTip("")
+        self._current_firmware_version = None
+        self._current_build_date = None
+        self._build_info_has_live_data = False
+        self._set_header_card_semantic_state("firmware_version", None)
+        self._set_header_card_semantic_state("build_date", None)
+        self.firmware_update_indicator.setVisible(False)
 
     def _refresh_controller_state(self, progress_callback: Callable[[], None] | None = None) -> None:
         if not self.serial_service.is_connected:
@@ -773,6 +1020,7 @@ class MainWindow(QMainWindow):
             )
         except SerialConnectionError as exc:
             self._clear_controller_state()
+            self._set_header_card_semantic_state("controller_state", "danger")
             self._append_log(f"Controller status read failed: {exc}")
             return
 
@@ -780,6 +1028,7 @@ class MainWindow(QMainWindow):
         self._controller_operating_state = snapshot.state
         self.controller_state_value.setText(snapshot.state or "Unavailable")
         self.controller_state_value.setToolTip(snapshot.status_hint or "\n".join(snapshot.raw_lines))
+        self._update_controller_state_semantics()
         self._update_section_button_states()
 
         if snapshot.state is not None:
@@ -791,6 +1040,7 @@ class MainWindow(QMainWindow):
         self._controller_operating_state = None
         self.controller_state_value.setText("--")
         self.controller_state_value.setToolTip("")
+        self._set_header_card_semantic_state("controller_state", None)
         self._update_section_button_states()
 
     def _refresh_external_expander(self, progress_callback: Callable[[], None] | None = None) -> None:
@@ -807,21 +1057,26 @@ class MainWindow(QMainWindow):
             )
         except SerialConnectionError as exc:
             self._clear_external_expander()
-            self._append_log(f"External expander read failed: {exc}")
+            self._set_header_card_semantic_state("external_expander", "danger")
+            self._append_log(f"Remote expansion module read failed: {exc}")
             return
 
         snapshot = parse_external_expander_snapshot(raw_response)
         self.external_expander_value.setText(snapshot.state or "Unavailable")
         self.external_expander_value.setToolTip(snapshot.status_hint or "\n".join(snapshot.raw_lines))
+        self._current_external_expander_state = snapshot.state
+        self._update_external_expander_semantics()
 
         if snapshot.state is not None:
-            self._append_log(f"External expander: {snapshot.state}.")
+            self._append_log(f"Remote expansion module: {snapshot.state}.")
         else:
-            self._append_log(f"External expander unavailable: {snapshot.status_hint}")
+            self._append_log(f"Remote expansion module unavailable: {snapshot.status_hint}")
 
     def _clear_external_expander(self) -> None:
         self.external_expander_value.setText("--")
         self.external_expander_value.setToolTip("")
+        self._current_external_expander_state = None
+        self._set_header_card_semantic_state("external_expander", None)
 
     def _refresh_temperature(self, progress_callback: Callable[[], None] | None = None) -> None:
         if not self.serial_service.is_connected:
@@ -837,6 +1092,7 @@ class MainWindow(QMainWindow):
             )
         except SerialConnectionError as exc:
             self._clear_temperature()
+            self._set_header_card_semantic_state("temperature", "danger")
             self._append_log(f"Temperature read failed: {exc}")
             return
 
@@ -847,6 +1103,8 @@ class MainWindow(QMainWindow):
 
         self.temperature_value.setText(display_value)
         self.temperature_value.setToolTip(snapshot.status_hint or "\n".join(snapshot.raw_lines))
+        self._current_temperature_c = snapshot.temperature_c
+        self._update_temperature_semantics()
 
         if snapshot.temperature_c is not None:
             self._append_log(f"Temperature: {snapshot.temperature_c:.2f} C.")
@@ -856,6 +1114,8 @@ class MainWindow(QMainWindow):
     def _clear_temperature(self) -> None:
         self.temperature_value.setText("--")
         self.temperature_value.setToolTip("")
+        self._current_temperature_c = None
+        self._set_header_card_semantic_state("temperature", None)
 
     def refresh_latest_firmware(self) -> None:
         self._fetch_latest_firmware_release(show_error_dialog=True)
@@ -876,17 +1136,7 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
 
-        self._latest_firmware_release = release
-        self._set_latest_firmware_status(
-            self._describe_latest_firmware_release(release),
-            tooltip="\n".join(
-                line
-                for line in (release.release_name or None, release.html_url, release.download_url)
-                if line
-            ),
-        )
-        self._append_log(f"Latest GitHub firmware: {self._release_version_text(release)} ({release.asset_name}).")
-        self.statusBar().showMessage(f"Latest GitHub firmware: {self._release_version_text(release)}")
+        self._apply_latest_firmware_release(release)
         return release
 
     def _initial_latest_firmware_status(self) -> str:
@@ -1187,6 +1437,8 @@ class MainWindow(QMainWindow):
         self.connect_button.setEnabled(not busy and (connected or bool(selected_port)))
         self.reboot_button.setEnabled(not busy and connected)
         self.find_controller_button.setEnabled(not busy and not connected)
+        self.manual_command_input.setEnabled(not busy and connected)
+        self.manual_command_button.setEnabled(not busy and connected and bool(self.manual_command_input.text().strip()))
         self.statusBar().showMessage(status_text)
 
     def _update_section_button_states(self) -> None:

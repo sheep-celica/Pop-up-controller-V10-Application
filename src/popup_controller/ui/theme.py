@@ -59,10 +59,34 @@ def apply_dark_theme(app: QApplication) -> None:
             border: 1px solid #2d3748;
             border-radius: 14px;
         }
+        QFrame#metricCard[semanticState="good"] {
+            background-color: #132219;
+            border: 1px solid #2f7a49;
+        }
+        QFrame#metricCard[semanticState="caution"] {
+            background-color: #251d10;
+            border: 1px solid #8f6a22;
+        }
+        QFrame#metricCard[semanticState="danger"] {
+            background-color: #251519;
+            border: 1px solid #8f3946;
+        }
         QFrame#miniMetricCard {
             background-color: #10151d;
             border: 1px solid #293546;
             border-radius: 12px;
+        }
+        QFrame#miniMetricCard[semanticState="good"] {
+            background-color: #132219;
+            border: 1px solid #2f7a49;
+        }
+        QFrame#miniMetricCard[semanticState="caution"] {
+            background-color: #251d10;
+            border: 1px solid #8f6a22;
+        }
+        QFrame#miniMetricCard[semanticState="danger"] {
+            background-color: #251519;
+            border: 1px solid #8f3946;
         }
         QFrame#editorCard {
             background-color: #121720;
@@ -153,6 +177,15 @@ def apply_dark_theme(app: QApplication) -> None:
             color: #f8fbff;
             background: transparent;
         }
+        QLabel[semanticState="good"] {
+            color: #7fe3a1;
+        }
+        QLabel[semanticState="caution"] {
+            color: #ffd36b;
+        }
+        QLabel[semanticState="danger"] {
+            color: #ff8a8a;
+        }
         QLabel#miniMetricCaption {
             font-size: 12px;
             font-weight: 600;
@@ -162,6 +195,19 @@ def apply_dark_theme(app: QApplication) -> None:
             font-weight: 700;
             color: #f8fbff;
             background: transparent;
+        }
+        QLabel#updateIndicator {
+            min-width: 24px;
+            max-width: 24px;
+            min-height: 24px;
+            max-height: 24px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 800;
+            qproperty-alignment: 'AlignCenter';
+            background-color: #8f6a22;
+            color: #111318;
+            padding: 0px;
         }
         QLabel#valueField {
             color: #f4f7fb;
@@ -195,6 +241,30 @@ def apply_dark_theme(app: QApplication) -> None:
         QAbstractSpinBox::down-arrow {
             width: 10px;
             height: 10px;
+        }
+        QComboBox[semanticState="good"] {
+            background-color: #112018;
+            border: 1px solid #2f7a49;
+            color: #dcffe7;
+        }
+        QComboBox[semanticState="good"]:focus {
+            border: 1px solid #59c27e;
+        }
+        QComboBox[semanticState="caution"] {
+            background-color: #221b0f;
+            border: 1px solid #8f6a22;
+            color: #ffe6a6;
+        }
+        QComboBox[semanticState="caution"]:focus {
+            border: 1px solid #d4a84c;
+        }
+        QComboBox[semanticState="danger"] {
+            background-color: #241417;
+            border: 1px solid #8f3946;
+            color: #ffd8dd;
+        }
+        QComboBox[semanticState="danger"]:focus {
+            border: 1px solid #cf6574;
         }
         QPushButton {
             background-color: #293142;

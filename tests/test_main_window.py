@@ -30,6 +30,7 @@ class FakeSerialService:
         self._available_ports = list(available_ports or [])
         self._request_responses = dict(request_responses or {})
         self.connect_calls: list[str] = []
+        self.request_calls: list[str] = []
         self.disconnect_calls = 0
 
     @property
@@ -76,6 +77,7 @@ class FakeSerialService:
         return []
 
     def request_text(self, command: str, **kwargs) -> str:
+        self.request_calls.append(command)
         return self._request_responses.get(command, "")
 
 
@@ -242,6 +244,261 @@ def test_main_window_styles_latest_release_like_serial_status_and_removes_manual
     assert "Check latest" not in [
         button.text() for button in window.firmware_group.findChildren(QPushButton) if button.text()
     ]
+
+
+def test_main_window_header_cards_start_neutral_before_connection_attempt(qtbot) -> None:
+    settings = AppSettings(auto_check_latest_firmware_on_startup=False)
+    window = MainWindow(
+        settings=settings,
+        serial_service=FakeSerialService(connected=False),
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    assert window.firmware_version_card.property("semanticState") is None
+    assert window.build_date_card.property("semanticState") is None
+    assert window.controller_state_card.property("semanticState") is None
+    assert window.external_expander_card.property("semanticState") is None
+    assert window.temperature_card.property("semanticState") is None
+    assert window.firmware_update_indicator.isHidden() is True
+
+
+def test_main_window_latest_release_lookup_does_not_turn_fw_cards_red_without_live_build_info(qtbot) -> None:
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=FakeSerialService(connected=False),
+        firmware_service=FakeFirmwareService(),
+        firmware_release_service=FakeFirmwareReleaseService(),
+    )
+    qtbot.addWidget(window)
+
+    window._apply_latest_firmware_release(window.firmware_release_service.fetch_latest_release())
+
+    assert window.firmware_version_card.property("semanticState") is None
+    assert window.build_date_card.property("semanticState") is None
+    assert window.firmware_update_indicator.isHidden() is True
+
+
+def test_main_window_renames_external_expander_card_caption(qtbot) -> None:
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=FakeSerialService(connected=False),
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    labels = window.external_expander_card.findChildren(type(window.external_expander_value))
+    assert any(label.text() == "Remote expansion module" for label in labels)
+
+
+def test_main_window_marks_connected_header_cards_green_when_values_are_healthy(qtbot) -> None:
+    serial_service = FakeSerialService(
+        connected=True,
+        request_responses={
+            "printBuildInfo": "FW_VERSION=1.0.9\nBUILD_TIMESTAMP=2026-03-15T17:57:58Z\n",
+            "getControllerStatus": "[66] Controller status: RUNNING\n",
+            "getExternalExpander": "Connected\n",
+            "readTemperature": "[734828] Temperature: 22.50 C\n",
+        },
+    )
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    window._refresh_build_info()
+    window._refresh_controller_state()
+    window._refresh_external_expander()
+    window._refresh_temperature()
+
+    assert window.firmware_version_card.property("semanticState") == "good"
+    assert window.build_date_card.property("semanticState") == "good"
+    assert window.controller_state_card.property("semanticState") == "good"
+    assert window.external_expander_card.property("semanticState") == "good"
+    assert window.temperature_card.property("semanticState") == "good"
+
+
+def test_main_window_marks_outdated_firmware_and_build_date_caution(qtbot, tmp_path: Path) -> None:
+    serial_service = FakeSerialService(
+        connected=True,
+        request_responses={
+            "printBuildInfo": "FW_VERSION=1.0.8\nBUILD_TIMESTAMP=2026-03-10T12:00:00Z\n",
+        },
+    )
+    release_service = FakeFirmwareReleaseService()
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False, firmware_directory=tmp_path),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+        firmware_release_service=release_service,
+    )
+    qtbot.addWidget(window)
+
+    window._refresh_build_info()
+    assert window.firmware_version_card.property("semanticState") == "good"
+    assert window.build_date_card.property("semanticState") == "good"
+
+    window.refresh_latest_firmware()
+
+    assert window.firmware_version_card.property("semanticState") == "caution"
+    assert window.build_date_card.property("semanticState") == "caution"
+    assert window.firmware_update_indicator.isHidden() is False
+    assert window.firmware_update_indicator.toolTip() == "A newer version is available."
+    assert window.firmware_update_indicator.text() == "!"
+
+
+def test_main_window_marks_bench_mode_caution(qtbot) -> None:
+    serial_service = FakeSerialService(
+        connected=True,
+        request_responses={"getControllerStatus": "[66] Controller status: BENCH MODE\n"},
+    )
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    window._refresh_controller_state()
+
+    assert window.controller_state_card.property("semanticState") == "caution"
+
+
+def test_main_window_marks_external_expander_not_connected_danger(qtbot) -> None:
+    serial_service = FakeSerialService(
+        connected=True,
+        request_responses={"getExternalExpander": "Not Connected\n"},
+    )
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    window._refresh_external_expander()
+
+    assert window.external_expander_card.property("semanticState") == "danger"
+
+
+def test_main_window_marks_out_of_range_temperature_danger(qtbot) -> None:
+    serial_service = FakeSerialService(
+        connected=True,
+        request_responses={"readTemperature": "[734828] Temperature: 44.50 C\n"},
+    )
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    window._refresh_temperature()
+
+    assert window.temperature_card.property("semanticState") == "danger"
+
+
+def test_main_window_marks_failed_readouts_danger(qtbot) -> None:
+    serial_service = FakeSerialService(
+        connected=True,
+        request_responses={
+            "printBuildInfo": "",
+            "getControllerStatus": "",
+            "getExternalExpander": "",
+            "readTemperature": "",
+        },
+    )
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    window._refresh_build_info()
+    window._refresh_controller_state()
+    window._refresh_external_expander()
+    window._refresh_temperature()
+
+    assert window.firmware_version_card.property("semanticState") == "danger"
+    assert window.build_date_card.property("semanticState") == "danger"
+    assert window.controller_state_card.property("semanticState") == "danger"
+    assert window.external_expander_card.property("semanticState") == "danger"
+    assert window.temperature_card.property("semanticState") == "danger"
+
+
+def test_main_window_disables_manual_command_controls_until_connected_and_non_empty(qtbot) -> None:
+    settings = AppSettings(auto_check_latest_firmware_on_startup=False)
+    serial_service = FakeSerialService(connected=False)
+    window = MainWindow(
+        settings=settings,
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    assert window.manual_command_input.isEnabled() is False
+    assert window.manual_command_button.isEnabled() is False
+
+    serial_service._connected = True
+    window._update_connection_state()
+
+    assert window.manual_command_input.isEnabled() is True
+    assert window.manual_command_button.isEnabled() is False
+
+    window.manual_command_input.setText("help")
+
+    assert window.manual_command_button.isEnabled() is True
+
+
+def test_send_manual_command_logs_transmit_and_response(qtbot) -> None:
+    serial_service = FakeSerialService(
+        connected=True,
+        request_responses={"help": "Available commands:\nprintBuildInfo\n"},
+    )
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    window.manual_command_input.setText("help")
+    window.send_manual_command()
+
+    assert serial_service.request_calls == ["help"]
+    assert window.manual_command_input.text() == ""
+    assert window.feedback_log.toPlainText().splitlines()[-3:] == [
+        "TX > help",
+        "RX < Available commands:",
+        "RX < printBuildInfo",
+    ]
+
+
+def test_send_manual_command_prompts_for_connection_when_disconnected(qtbot, monkeypatch) -> None:
+    serial_service = FakeSerialService(connected=False)
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    messages: list[tuple[str, str]] = []
+
+    def fake_information(parent, title, text):
+        messages.append((title, text))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "information", fake_information)
+
+    window.manual_command_input.setText("help")
+    window.send_manual_command()
+
+    assert serial_service.request_calls == []
+    assert messages == [("Connect first", "Connect to the controller before sending manual commands.")]
 
 
 def test_main_window_matches_firmware_action_button_widths_and_flash_accent(qtbot) -> None:
@@ -546,6 +803,8 @@ def test_main_window_auto_checks_latest_firmware_on_first_show(qtbot, monkeypatc
     callback = scheduled["callback"]
     assert callable(callback)
     callback()
+    qtbot.waitUntil(lambda: release_service.fetch_calls == 1, timeout=1000)
+    window._check_startup_firmware_fetch()
 
     assert release_service.fetch_calls == 1
     assert window.latest_firmware_status_label.text() == "v1.0.9 - Published 2026-03-15"
