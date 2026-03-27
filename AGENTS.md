@@ -51,6 +51,8 @@ This repository contains the Windows desktop application for the Pop-up Controll
 - Prefer repo-root relative commands and paths in documentation and automation.
 - Preserve the existing `src/` package layout.
 - Avoid moving protocol details into dialogs or window classes.
+- Maintain `CHANGES_SINCE_LAST_RELEASE.md` as a brief markdown bulletin of unreleased user-facing, workflow, packaging, or notable support-impacting changes since the latest git release tag.
+- When your change meaningfully alters behavior, tooling, packaging, docs, or support workflow, update `CHANGES_SINCE_LAST_RELEASE.md` in the same change set with a short plain-language bullet.
 - If you change packaging inputs, also review `popup-controller.spec`, `scripts/build_exe.ps1`, and any copied distribution assets.
 - If you change versioning or release behavior, also review `scripts/build_version.py`, `.github/workflows/`, and the firmware release service/tests.
 - If you add new user-visible sections or dialogs, review `src/popup_controller/ui/sections.py`, related dialog classes, and layout tests.

@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 import re
 import threading
+from datetime import datetime
 
 from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QIcon, QShowEvent
@@ -38,6 +39,7 @@ from popup_controller.services.controller_status_service import parse_controller
 from popup_controller.services.firmware_service import FirmwareService
 from popup_controller.services.firmware_release_service import FirmwareReleaseError, FirmwareReleaseInfo, FirmwareReleaseService
 from popup_controller.services.serial_service import SerialConnectionError, SerialService
+from popup_controller.services.support_export_service import SupportExportService
 from popup_controller.services.temperature_service import parse_temperature_snapshot
 from popup_controller.ui.direct_controls_dialog import DirectControlsDialog
 from popup_controller.ui.errors_dialog import ErrorsDialog
@@ -66,6 +68,7 @@ class MainWindow(QMainWindow):
         serial_service: SerialService | None = None,
         firmware_service: FirmwareService | None = None,
         firmware_release_service: FirmwareReleaseService | None = None,
+        support_export_service: SupportExportService | None = None,
     ) -> None:
         super().__init__()
         self.settings = settings
@@ -77,6 +80,7 @@ class MainWindow(QMainWindow):
         self.firmware_release_service = firmware_release_service or FirmwareReleaseService(
             settings.firmware_release_api_url
         )
+        self.support_export_service = support_export_service or SupportExportService()
         self._latest_firmware_release: FirmwareReleaseInfo | None = None
         self._startup_firmware_check_scheduled = False
         self._header_info_card_columns = 0
@@ -465,6 +469,11 @@ class MainWindow(QMainWindow):
             self.section_buttons[section.section_id] = button
             self.section_button_order.append(section.section_id)
 
+        self.export_support_button = QPushButton("Export support file", self.sections_group)
+        self.export_support_button.setToolTip(
+            "Collect controller details from all readable sections and save them as a JSON support report."
+        )
+
         return self.sections_group
 
     def _build_firmware_group(self) -> QGroupBox:
@@ -553,6 +562,7 @@ class MainWindow(QMainWindow):
         self.browse_firmware_button.clicked.connect(self.browse_firmware)
         self.flash_button.clicked.connect(self.flash_firmware)
         self.download_latest_firmware_button.clicked.connect(self.download_latest_firmware)
+        self.export_support_button.clicked.connect(self.export_support_file)
         self.manual_command_button.clicked.connect(self.send_manual_command)
         self.manual_command_input.returnPressed.connect(self.send_manual_command)
         self.manual_command_input.textChanged.connect(lambda _text: self._update_connection_state())
@@ -633,6 +643,9 @@ class MainWindow(QMainWindow):
             row = index // column_count
             column = index % column_count
             self.sections_layout.addWidget(self.section_buttons[section_id], row, column)
+
+        action_row = max(1, (len(self.section_button_order) + column_count - 1) // column_count)
+        self.sections_layout.addWidget(self.export_support_button, action_row, 0, 1, column_count)
 
         for column in range(column_count):
             self.sections_layout.setColumnStretch(column, 1)
@@ -1207,6 +1220,70 @@ class MainWindow(QMainWindow):
         if selected_file:
             self.firmware_path_input.setText(selected_file)
 
+    def export_support_file(self) -> None:
+        if not self.serial_service.is_connected:
+            QMessageBox.information(
+                self,
+                "Connect first",
+                "Connect to the controller before exporting a support file.",
+            )
+            return
+
+        default_name = self._default_support_export_file_name()
+        selected_file, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export support file",
+            str((Path.cwd() / default_name).resolve()),
+            "JSON files (*.json);;All files (*.*)",
+        )
+        if not selected_file:
+            return
+
+        output_path = Path(selected_file)
+        activity_log_tail = self._support_export_log_tail()
+        poll_was_active = self._poll_timer.isActive()
+        if poll_was_active:
+            self._poll_timer.stop()
+
+        self._append_log(f"Starting support export to {output_path}.")
+        self._begin_busy("Collecting support data...")
+        try:
+            self.support_export_service.export_to_file(
+                output_path=output_path,
+                serial_service=self.serial_service,
+                app_version=self.settings.app_version,
+                selected_port=self.serial_service.port_name or self._selected_port(),
+                activity_log_lines=activity_log_tail,
+                firmware_release_service=self.firmware_release_service,
+                progress_callback=self._process_loading_events,
+                selected_firmware_path=self.firmware_path_input.text().strip(),
+            )
+        except OSError as exc:
+            self._append_log(f"Support export failed: {exc}")
+            QMessageBox.warning(self, "Support export", str(exc))
+            return
+        finally:
+            self._end_busy()
+            if poll_was_active and self.serial_service.is_connected:
+                self._poll_timer.start()
+
+        self._append_log(f"Support export saved to {output_path}.")
+        self.statusBar().showMessage(f"Support export saved to {output_path}")
+        QMessageBox.information(
+            self,
+            "Support export",
+            f"Saved support report to:\n{output_path}",
+        )
+
+    def _default_support_export_file_name(self) -> str:
+        port_name = (self.serial_service.port_name or self._selected_port() or "controller").replace(" ", "_")
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return f"popup-controller-support-{port_name}-{timestamp}.json"
+
+    def _support_export_log_tail(self, max_lines: int = 200) -> tuple[str, ...]:
+        lines = [line.strip() for line in self.feedback_log.toPlainText().splitlines() if line.strip()]
+        return tuple(lines[-max_lines:])
+
     def flash_firmware(self) -> None:
         selected_port = self.serial_service.port_name or self._selected_port() or ""
         if not selected_port:
@@ -1432,6 +1509,7 @@ class MainWindow(QMainWindow):
         self.status_label.setText(status_text)
         self.sections_group.setEnabled(connected and not busy)
         self._update_section_button_states()
+        self.export_support_button.setEnabled(not busy and connected)
         self.firmware_group.setEnabled(not busy)
         self.flash_button.setEnabled(not busy and (connected or bool(selected_port)))
         self.connect_button.setEnabled(not busy and (connected or bool(selected_port)))

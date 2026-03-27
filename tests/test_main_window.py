@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QMessageBox, QPushButton, QScrollArea
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QPushButton, QScrollArea
 
 from popup_controller.config import AppSettings
 from popup_controller.services.firmware_service import FlashResult
@@ -119,6 +119,17 @@ class FakeFirmwareReleaseService:
         downloaded_path = destination_directory / release.asset_name
         downloaded_path.write_bytes(b"zip data")
         return FirmwareDownloadResult(path=downloaded_path, downloaded=True)
+
+
+class FakeSupportExportService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def export_to_file(self, **kwargs):
+        self.calls.append(kwargs)
+        output_path = Path(kwargs["output_path"])
+        output_path.write_text('{"ok": true}', encoding="utf-8")
+        return output_path
 
 
 def test_main_window_shows_application_version(qtbot) -> None:
@@ -244,6 +255,18 @@ def test_main_window_styles_latest_release_like_serial_status_and_removes_manual
     assert "Check latest" not in [
         button.text() for button in window.firmware_group.findChildren(QPushButton) if button.text()
     ]
+
+
+def test_main_window_places_support_export_button_in_sections_group(qtbot) -> None:
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=FakeSerialService(connected=False),
+        firmware_service=FakeFirmwareService(),
+    )
+    qtbot.addWidget(window)
+
+    assert window.export_support_button.parentWidget() is window.sections_group
+    assert window.export_support_button.text() == "Export support file"
 
 
 def test_main_window_header_cards_start_neutral_before_connection_attempt(qtbot) -> None:
@@ -499,6 +522,69 @@ def test_send_manual_command_prompts_for_connection_when_disconnected(qtbot, mon
 
     assert serial_service.request_calls == []
     assert messages == [("Connect first", "Connect to the controller before sending manual commands.")]
+
+
+def test_support_export_button_requires_connection(qtbot, monkeypatch) -> None:
+    serial_service = FakeSerialService(connected=False)
+    export_service = FakeSupportExportService()
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+        support_export_service=export_service,
+    )
+    qtbot.addWidget(window)
+
+    messages: list[tuple[str, str]] = []
+
+    def fake_information(parent, title, text):
+        messages.append((title, text))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "information", fake_information)
+
+    window.export_support_file()
+
+    assert export_service.calls == []
+    assert messages == [("Connect first", "Connect to the controller before exporting a support file.")]
+
+
+def test_support_export_saves_json_report(qtbot, monkeypatch, tmp_path: Path) -> None:
+    serial_service = FakeSerialService(connected=True)
+    export_service = FakeSupportExportService()
+    release_service = FakeFirmwareReleaseService()
+    window = MainWindow(
+        settings=AppSettings(auto_check_latest_firmware_on_startup=False, firmware_directory=tmp_path),
+        serial_service=serial_service,
+        firmware_service=FakeFirmwareService(),
+        firmware_release_service=release_service,
+        support_export_service=export_service,
+    )
+    qtbot.addWidget(window)
+
+    target_path = tmp_path / "support.json"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(target_path), "JSON files (*.json)"))
+    info_messages: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda parent, title, text: info_messages.append((title, text)) or QMessageBox.StandardButton.Ok,
+    )
+
+    window.feedback_log.setPlainText("Line 1\nLine 2\n")
+    window.firmware_path_input.setText(str(tmp_path / "flash_bundle.zip"))
+    window.export_support_file()
+
+    assert len(export_service.calls) == 1
+    call = export_service.calls[0]
+    assert call["output_path"] == target_path
+    assert call["app_version"] == window.settings.app_version
+    assert call["selected_port"] == "COM11"
+    assert call["activity_log_lines"] == ("Line 1", "Line 2")
+    assert call["firmware_release_service"] is release_service
+    assert call["selected_firmware_path"] == str(tmp_path / "flash_bundle.zip")
+    assert target_path.read_text(encoding="utf-8") == '{"ok": true}'
+    assert info_messages == [("Support export", f"Saved support report to:\n{target_path}")]
 
 
 def test_main_window_matches_firmware_action_button_widths_and_flash_accent(qtbot) -> None:
